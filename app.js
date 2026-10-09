@@ -44,7 +44,7 @@ const english = {
   routeSotaBody: 'Select an implementation → Bound reproduction → Iterate in place',
   routeForgeTitle: 'Forge a package for standalone runs',
   routeForgeBody: 'Fix evaluation & budget → Build the package → Run autonomously',
-  routeContinuation: 'Use Autoresearch directly in an existing codebase; resume a loop with its contract and ledger intact. Choose Forge when standalone delivery is needed.',
+  routeContinuation: 'You set the research goal. Lemvo chooses how to experiment: iterating on an existing model or building a self-running experiment package to automate method changes, evaluation, and result tracking.',
   directionHeading: 'After the results, where next?',
   capabilitiesTitle: 'From understanding a question to making a discovery.',
   capabilitiesDescription: 'Literature reveals questions worth answering. Experiments turn ideas into methods. Writing connects findings into an argument. Shared research state and narrative plans keep the stages connected.',
