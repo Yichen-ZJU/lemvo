@@ -24,9 +24,10 @@
   <link rel="stylesheet" href="lemvo-brand.css?v=2">
   <link rel="stylesheet" href="research-stages.css">
   <link rel="stylesheet" href="research-routes.css">
+  <link rel="stylesheet" href="paper-narrative.css?v=1">
   <link rel="stylesheet" href="workflow-demo.css">
   <script src="skills-data.js?v=lemvo-agent-3" defer></script>
-  <script src="app.js?v=lemvo-loops-4" defer></script>
+  <script src="app.js?v=lemvo-narrative-5" defer></script>
   <script src="workflow-demo.js?v=lemvo-agent-3" defer></script>
 </head>
 <body>
@@ -100,7 +101,40 @@
     <div class="experiment-workbench"><div class="package-heading"><span>OPTION / FORGE</span><span data-i18n="packageLabel">需要独立交付时，需要独立交付时，构造任务包</span></div><div class="file-stack"><div><span class="file-icon">▣</span><code>prepare.py</code><span class="file-tag" data-i18n="locked">锁定数据与评估</span></div><div><span class="file-icon mint">⌘</span><code>train.py</code><span class="file-tag mint" data-i18n="editable">模型与训练可改</span></div><div><span class="file-icon">≡</span><code>program.md</code><span class="file-tag" data-i18n="contract">目标、预算与边界</span></div><div><span class="file-icon">▤</span><code>pyproject.toml</code><span class="file-tag" data-i18n="dependencies">锁定依赖</span></div><div><span class="file-icon">↳</span><code>results.tsv</code><span class="file-tag" data-i18n="ledger">每轮实验台账</span></div></div><div class="package-heading"><span>INNER LOOP / AUTORESEARCH</span><span data-i18n="executionLabel">运行自主优化循环</span></div><div class="optimization-loop"><div><span data-i18n="loopBaseline">先跑基线</span><span aria-hidden="true">→</span><span data-i18n="loopModify">提出并实施改动</span><span aria-hidden="true">→</span><span data-i18n="loopEvaluate">训练与评估</span></div><div class="loop-decisions"><span data-i18n="loopDecision">保留有效改进 · 回滚退步</span><span aria-hidden="true">↺</span></div></div><div class="experiment-guards"><span data-i18n="guardBudget">运行预算</span><span data-i18n="guardRegression">防回归检查</span><span data-i18n="guardNoise">小幅改进复测</span><span data-i18n="guardLedger">Git 留痕</span></div></div>
     <p class="optimization-note" data-i18n="optimizationNote">每轮留下代码、测量与判断；外循环把这些记录综合成发现，再决定深化、拓展、改动或收尾。</p>
   </article>
-  <article class="writing-feature" id="write"><div class="writing-copy"><div class="feature-index">03 <span>PAPER PRODUCTION + DUAL REVIEW</span></div><h3 data-i18n="writingTitle">让实验结果，长成一篇有说服力的论文。</h3><p data-i18n="writingDescription">把研究中的问题、洞见、方法与证据组织成清晰主线。摘要抓住核心贡献，Introduction 展开问题张力，实验回答关键追问，结尾凝练发现。叙事规划、图文表达、引用核验与双重评审贯穿全稿。</p><a class="text-link small" href="https://github.com/Yichen-ZJU/codex-for-research/tree/54b33b26d84696b42a94116252872845b49bb166/skills/paper-production" target="_blank" rel="noopener noreferrer" data-i18n="writingSource">查看论文总装线 ↗</a></div><div class="writing-pipeline"><div class="paper-stage"><span>01</span><strong data-i18n="paperIdea">选题与骨架</strong><code>idea-evaluator → templates</code></div><div class="paper-stage"><span>02</span><strong data-i18n="paperNarrative">叙事与图规划</strong><code>intro-drafter → paper-narrative</code></div><div class="paper-stage"><span>03</span><strong data-i18n="paperDraft">起草与证据核验</strong><code>writer → verifier</code></div><div class="paper-stage"><span>04</span><strong data-i18n="paperReview">证据审查 + 写作审查</strong><code>reviewer + pre-submission-reviewer</code></div><div class="writing-footer"><span class="status-dot"></span><span data-i18n="paperGate">每阶段设质量门 · 保留来源与 AI 使用披露</span></div></div></article>
+  <article class="writing-feature" id="write" aria-labelledby="writing-title">
+    <div class="writing-copy">
+      <div class="feature-index">03 <span>PAPER NARRATIVE + PAPER PRODUCTION</span></div>
+      <h3 id="writing-title" data-i18n="writingTitle">让发现有主线，让论文有说服力。</h3>
+      <p data-i18n="writingDescription">Paper Narrative 从研究贡献出发，选定全文叙事主线，把问题、洞见、方法与证据接成清晰的论证。摘要抓住核心发现，Introduction 建立问题张力，章节与图序推进论证，结尾回答开篇问题、留下新的认识。</p>
+      <p class="writing-shared-plan" data-i18n="writingSharedPlan">一份共享叙事计划贯穿全文。发现改变时，摘要、正文与结尾一起对齐；图文表达、引用核验与双重评审衔接论文交付。</p>
+      <div class="writing-source-links">
+        <a class="text-link small" href="https://github.com/Yichen-ZJU/codex-for-research/blob/7edebf1f341098c7bbbd2170feb1b8e8a149b32f/skills/paper-narrative/SKILL.md" target="_blank" rel="noopener noreferrer" data-i18n="narrativeSource">查看 Paper Narrative ↗</a>
+        <a class="text-link small" href="https://github.com/Yichen-ZJU/codex-for-research/tree/7edebf1f341098c7bbbd2170feb1b8e8a149b32f/skills/paper-production" target="_blank" rel="noopener noreferrer" data-i18n="writingSource">查看论文总装线 ↗</a>
+      </div>
+    </div>
+    <div class="writing-pipeline">
+      <div class="paper-stage"><span>01</span><strong data-i18n="paperIdea">核心发现与论证骨架</strong><code>research findings → argument</code></div>
+      <div class="paper-stage"><span>02</span><strong data-i18n="paperNarrative">叙事主线、Introduction 与图序</strong><code>paper-narrative → intro-drafter</code></div>
+      <div class="paper-stage"><span>03</span><strong data-i18n="paperDraft">摘要、正文与结尾协同起草</strong><code>shared narrative → paper-writing</code></div>
+      <div class="paper-stage"><span>04</span><strong data-i18n="paperReview">证据核验 + 写作评审</strong><code>verifier + pre-submission-reviewer</code></div>
+      <div class="writing-footer"><span class="status-dot"></span><span data-i18n="paperGate">贡献先行 · 证据相连 · 全文主线一致</span></div>
+    </div>
+    <div class="narrative-lenses" aria-labelledby="narrative-lenses-title">
+      <div class="narrative-lenses-heading">
+        <div><span class="mono-label">SIX SCIENTIFIC NARRATIVE LENSES</span><h4 id="narrative-lenses-title" data-i18n="narrativeLensesTitle">从贡献出发，找到这篇论文的故事。</h4></div>
+        <p data-i18n="narrativeLensesDescription">六种叙事路线，按研究选择与融合。</p>
+      </div>
+      <div class="narrative-lens-grid">
+        <div class="narrative-lens"><span aria-hidden="true">01</span><div><strong data-i18n="narrativeRootTitle">根因手术刀</strong><p data-i18n="narrativeRootBody">从失效现象走向机制解释与针对性设计。</p></div></div>
+        <div class="narrative-lens"><span aria-hidden="true">02</span><div><strong data-i18n="narrativeReframeTitle">反直觉重构</strong><p data-i18n="narrativeReframeBody">重新审视默认设定，建立更有效的视角。</p></div></div>
+        <div class="narrative-lens"><span aria-hidden="true">03</span><div><strong data-i18n="narrativeTheoryTitle">理论照亮经验</strong><p data-i18n="narrativeTheoryBody">把形式化结果写成读者能理解的新认识。</p></div></div>
+        <div class="narrative-lens"><span aria-hidden="true">04</span><div><strong data-i18n="narrativeBenchmarkTitle">新基准暴露失效</strong><p data-i18n="narrativeBenchmarkBody">让被忽略的问题变得可测量、可解释。</p></div></div>
+        <div class="narrative-lens"><span aria-hidden="true">05</span><div><strong data-i18n="narrativeValueTitle">社会价值叙事</strong><p data-i18n="narrativeValueBody">围绕真实需求，讲清技术选择与应用价值。</p></div></div>
+        <div class="narrative-lens"><span aria-hidden="true">06</span><div><strong data-i18n="narrativeUnityTitle">极简统一美学</strong><p data-i18n="narrativeUnityBody">用一个共同原则，串联多个问题与结果。</p></div></div>
+      </div>
+      <p class="narrative-landing" data-i18n="narrativeLanding">最后留给读者的，是这项研究建立了什么新认识，以及为什么重要。</p>
+    </div>
+  </article>
   <div class="principle-strip"><span class="principle-icon">⎇</span><div><h3 data-i18n="principleTitle">先提交研究计划，再运行实验。</h3><p data-i18n="principleDescription">Protocol 与 results 分开提交，保留计划先于结果的 Git 记录。失败与阴性结果，也有自己的位置。</p></div><code>protocol → commit → run</code></div>
 </section>
 <section class="section container" id="walkthrough">

@@ -11,6 +11,7 @@ Files
   styles.css          Base responsive dark theme and motion
   lemvo-brand.css   Shared brand accents and engine-title typography
   research-stages.css  Research, optimization, and compact footer credits
+  paper-narrative.css  Contribution-led writing and six scientific story routes
   app.js              English copy, language switch, tabs, search, copy, and demo
   skills-data.js      115 shared skill entries, source links, 12 topic groups
   assets/logo.png     Approved A dual-loop lens brand mark
@@ -25,6 +26,9 @@ Research narrative
   and improvement of existing methods, or a standalone Forge task package.
   Autoresearch executes the unattended inner loop; the outer loop interprets
   findings and revises direction. ArXiv MCP provides full-text retrieval.
+  Paper Narrative shapes one shared argument across the abstract, introduction,
+  evidence, section order, figure order, and conclusion. Six scientific story
+  routes are selected for the contribution, not imposed as a fixed template.
 
 Repository snapshot checked 2026-10-08
   Claude: 115 skills at ccec0679a9534e1757d4e358e610023d9e33d11f
