@@ -1,11 +1,11 @@
 {
-  "checkedAt": "2026-10-08",
-  "method": "Current public repository HEAD tracked skills/*/SKILL.md lists compared; 115 each, identical sorted paths SHA256 c83f62134202eccbce45a065ea3631a56dae285f558842b2f22c6c66475ab338",
+  "checkedAt": "2026-10-09",
+  "method": "Tracked skills/*/SKILL.md files at the pinned repository commits: 115 each, identical sorted skill names. README-only refresh commits preserve the Round-16 engine sources.",
   "skillNamesMatch": true,
   "sharedCount": 115,
   "repositories": {
     "claude-for-research": {
-      "commit": "ccec0679a9534e1757d4e358e610023d9e33d11f",
+      "commit": "70c8d67b7496e6b2c1815f5041a3b3ec9b368a2d",
       "count": 115,
       "skills": [
         "a-evolve",
@@ -126,7 +126,7 @@
       ]
     },
     "codex-for-research": {
-      "commit": "54b33b26d84696b42a94116252872845b49bb166",
+      "commit": "928f7484684f5c74e34c8f2ea8053f90c476398f",
       "count": 115,
       "skills": [
         "a-evolve",

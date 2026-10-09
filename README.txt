@@ -15,7 +15,8 @@ Files
   app.js              English copy, language switch, tabs, search, copy, and demo
   skills-data.js      115 shared skill entries, source links, 12 topic groups
   assets/logo.png     Approved A dual-loop lens brand mark
-  workflow-demo.js    Twelve-step bilingual teaching animation and playback
+  research-continuity.css  Continuous-research cards, anchor offsets and handoff
+  workflow-demo.js    Fourteen-step bilingual teaching animation and playback
   workflow-demo.css   Nested-loop visualization and motion
   demo/release-snapshot.json  Pinned repository skill-count evidence
 
@@ -29,10 +30,15 @@ Research narrative
   Paper Narrative shapes one shared argument across the abstract, introduction,
   evidence, section order, figure order, and conclusion. Six scientific story
   routes are selected for the contribution, not imposed as a fixed template.
+  Continuous-research conventions keep state and findings across turns, bound
+  preparation, launch small probes when ready, and turn diagnostics into changes.
+  Claude heartbeats run within an active session. The Codex reference driver
+  resumes one project session per invocation and can be scheduled externally;
+  it does not replace existing launchers or start automatically on installation.
 
-Repository snapshot checked 2026-10-08
-  Claude: 115 skills at ccec0679a9534e1757d4e358e610023d9e33d11f
-  Codex: 115 skills at 54b33b26d84696b42a94116252872845b49bb166
+Repository snapshot checked 2026-10-09
+  Claude: 115 skills at 70c8d67b7496e6b2c1815f5041a3b3ec9b368a2d
+  Codex: 115 skills at 928f7484684f5c74e34c8f2ea8053f90c476398f
   Shared names: 115.
   Count convention: skills/<directory>/SKILL.md; not agents or nested references.
 
@@ -43,10 +49,11 @@ Language
 
 Teaching demonstration
   Both animations are illustrative, not live model calls or training runs.
-  The main twelve-step example improves a handwritten-digit classifier:
-    question -> literature/ideas -> Forge -> inner loop (keep/revert)
-    -> outer reflection (DEEPEN) -> revised hypothesis/protocol
-    -> inner loop with confirmation runs -> CONCLUDE -> writing and review.
+  The main fourteen-step example studies a handwritten-digit classifier:
+    question -> literature/ideas -> optional Forge -> READY_TO_PROBE -> baseline
+    -> inner loop (keep/revert) -> outer reflection (DEEPEN)
+    -> revised hypothesis/protocol -> concrete method change -> confirmation
+    -> CONCLUDE -> shared Paper Narrative -> writing and review.
   All accuracy values are fictional. The example contains no personal research
   results, experiment commit IDs, or real validation-check counts.
   Play/pause, next step, restart, and the progress slider are keyboard accessible.

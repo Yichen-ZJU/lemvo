@@ -10,13 +10,15 @@
     label: ['教学示例 · 非真实实验数据', 'TEACHING DEMO · SIMULATED DATA'],
     play: ['播放', 'Play'], pause: ['暂停', 'Pause'], again: ['再看一遍', 'Play again'],
     next: ['下一步 →', 'Next step →'], restart: ['重播 ↺', 'Restart ↺'],
-    routeResearch: ['调研与构思', 'Research & ideas'], routeSetup: ['选择实验路线', 'Choose a route'], routeSetup: ['选择实验路线', 'Choose a route'], routeLoops: ['双循环实验', 'Two-loop research'], routeWriting: ['写作与评审', 'Writing & review'],
+    routeResearch: ['调研与构思', 'Research & ideas'], routeSetup: ['选择实验路线', 'Choose a route'], routeLoops: ['双循环实验', 'Two-loop research'], routeWriting: ['写作与评审', 'Writing & review'],
     outerQuestion: ['下一步，该研究什么？', 'What should we investigate next?'],
     innerQuestion: ['这个想法，怎样做得更好？', 'How can this idea work better?'],
     nodeModify: ['改模型', 'Modify'], nodeRun: ['训练与测量', 'Train & measure'],
     nodeDecide: ['保留或回滚', 'Keep or revert'], fixedEval: ['固定评估', 'Fixed evaluation'],
     loopWaiting: ['先明确课题，再开始实验', 'Frame the question before experimenting'],
     loopBaseline: ['基线已记录，评估保持不变', 'Baseline recorded. Evaluation stays fixed.'],
+    loopProbe: ['实现、评测与预算就绪，开始最小小试', 'Implementation, measurement, and budget ready. Start a small probe.'],
+    loopRevise: ['落实具体改动，带着已保留的模型再验证', 'Make a concrete change. Retest from the retained model.'],
     loopKeep: ['保留改进，再尝试下一次修改', 'Keep the improvement. Try the next change.'],
     loopRevert: ['撤回退步，回到已保留的模型', 'Revert the regression to the retained model.'],
     loopReflect: ['暂停内循环，交给外循环反思', 'Step out of the inner loop to reflect.'],
@@ -38,10 +40,10 @@
     bestScore: ['当前保留 · 示意', 'Retained · simulated'],
     stepOutput: ['这一步留下', 'ARTIFACT'],
     progress: ['流程进度', 'Progress'],
-    innerTakeawayTitle: ['内循环：优化一个假设。', 'Inner loop: improve one hypothesis. '],
-    innerTakeaway: ['修改、测量，保留有效改进。', 'Modify, measure, keep what helps.'],
+    innerTakeawayTitle: ['内循环：构建与验证方法。', 'Inner loop: build and test methods.'],
+    innerTakeaway: ['修改、测量、保留进展，再验证。', 'Modify, measure, preserve progress, and retest.'],
     outerTakeawayTitle: ['外循环：更新研究方向。', 'Outer loop: update the direction. '],
-    outerTakeaway: ['解释结果，提出下一轮问题。', 'Interpret results. Ask the next question.'],
+    outerTakeaway: ['解释发现，把诊断变成下一步。', 'Interpret findings. Turn diagnosis into the next action.'],
     disclaimer: ['流程演示，指标为示意数据。', 'Workflow demo. Metrics are illustrative.'],
     question: ['怎样让一个小模型更准确地识别手写数字？', 'How can a small model recognize handwritten digits more accurately?'],
     hypothesis1: ['适度增加模型容量，能否提高识别正确率？', 'Could a modest increase in model capacity improve accuracy?'],
@@ -64,11 +66,18 @@
       body:['扫描相关方法、核验原文证据，筛选可行想法。这一轮先问：适度增加模型容量，会不会让识别更准确？', 'Survey approaches, check source evidence, and evaluate candidate ideas. Start with one testable question: could a slightly larger model recognize digits better?']
     },
     {
-      phase:'protocol', route:1, directive:'FORGE', hypothesis:'hypothesis1', h:'HYPOTHESIS 01', reflection:'waiting', loop:'loopBaseline',
-      duration:4500, trial:90.0, best:90.0, verdict:'baseline', skills:['experiment-forge'], artifact:'program.md + prepare.py + train.py',
-      label:['任务包 → 锁定评估 → 基线', 'PACKAGE → LOCK EVALUATION → BASELINE'],
+      phase:'protocol', route:1, directive:'FORGE', hypothesis:'hypothesis1', h:'HYPOTHESIS 01', reflection:'waiting', loop:'loopWaiting',
+      duration:4200, trial:null, best:null, verdict:'protocol', skills:['experiment-forge'], artifact:'program.md + prepare.py + train.py',
+      label:['选择路线 → 按需造包 → 锁定评估', 'CHOOSE A ROUTE → OPTIONAL PACKAGE → FIX EVALUATION'],
       title:['选一条适合本题的实验路线。', 'Choose a route for this question.'],
-      body:['本例选择 Forge，便于把任务包独立交付运行；有现成可迭代代码时，也可直接调用 Autoresearch。固定评估与预算，提交计划后建立 90.0% 的示意基线。', 'This example chooses Forge for a standalone task package; an existing iterable codebase can use Autoresearch directly. Fix evaluation and budget, commit the plan, then establish the illustrative 90.0% baseline.']
+      body:['本例选择 Forge，便于独立交付；有现成代码也可直接调用 Autoresearch。固定评估、开放训练文件，写下假设与预算，提交一份可执行计划。', 'This example chooses Forge for standalone delivery; existing code can use Autoresearch directly. Fix evaluation, identify editable training files, and commit the hypothesis, budget, and actionable plan.']
+    },
+    {
+      phase:'inner', route:2, directive:'READY_TO_PROBE', hypothesis:'hypothesis1', h:'HYPOTHESIS 01', reflection:'waiting', loop:'loopProbe',
+      duration:4200, trial:90.0, best:90.0, verdict:'baseline', skills:['research-orchestrator','run-experiment'], artifact:'research-state.yaml + baseline.json',
+      label:['准备就绪 → 最小小试 → 基线', 'READY → SMALL PROBE → BASELINE'],
+      title:['就绪后，从小试开始。', 'Ready to run? Start small.'],
+      body:['实现能跑、评测单位与尺度有效，而且在预算内。Orchestrator 选择最小探针，运行固定评估，建立 90.0% 的示意基线；记录这次观测，进入方法迭代。', 'The implementation runs, measurement units and scale are valid, and budget is available. Orchestrator chooses a small probe, runs the fixed evaluation, and records an illustrative 90.0% baseline before method iteration.']
     },
     {
       phase:'inner', route:2, directive:'EXPERIMENT', hypothesis:'hypothesis1', h:'HYPOTHESIS 01', reflection:'waiting', loop:'loopKeep',
@@ -99,6 +108,13 @@
       body:['提出 H2：训练时加入轻微旋转增强，能否减少这类错误？更新任务包并提交计划；仍用同一评估集，避免移动评价标准。', 'Form H2: could mild rotation augmentation during training reduce these errors? Update the task package and commit the plan. Keep the evaluation set unchanged.']
     },
     {
+      phase:'inner', route:2, directive:'REVISE', hypothesis:'hypothesis2', h:'HYPOTHESIS 02', reflection:'h2', loop:'loopRevise',
+      duration:4200, trial:null, best:91.2, verdict:'change', skills:['autoresearch'], artifact:'train.py · mild rotation · eval unchanged',
+      label:['诊断 → 具体改动 → 再验证', 'DIAGNOSE → REVISE → RETEST'],
+      title:['把诊断落实到代码里。', 'Turn diagnosis into a code change.'],
+      body:['在训练输入中加入轻微旋转增强，保留当前模型和固定评估集。带着已保留的 91.2% 模型进入下一轮，检验这项改动是否改善识别。', 'Add mild rotation augmentation to training inputs, keeping the current model and fixed evaluation. Start from the retained 91.2% model and test whether the change improves recognition.']
+    },
+    {
       phase:'inner', route:2, directive:'EXPERIMENT', hypothesis:'hypothesis2', h:'HYPOTHESIS 02', reflection:'h2', loop:'loopPending',
       duration:4000, trial:93.0, best:91.2, verdict:'pending', skills:['autoresearch','run-experiment'], artifact:'results.tsv · trial 03 · pending recheck',
       label:['内循环 2 · 检验新的假设', 'INNER LOOP 2 · TEST THE NEW IDEA'],
@@ -121,10 +137,10 @@
     },
     {
       phase:'writing', route:3, directive:'WRITE', hypothesis:'hypothesis2', h:'SYNTHESIS', reflection:'conclude', loop:'loopConclude',
-      duration:4500, trial:null, best:92.8, verdict:'write', skills:['paper-production','paper-narrative','paper-writing'], artifact:'figures/ + paper-draft.md + citations',
+      duration:4500, trial:null, best:92.8, verdict:'write', skills:['paper-production','paper-narrative','paper-writing'], artifact:'narrative-plan.md → figures/ + paper-draft.md',
       label:['综合发现 → 图表 → 论文草稿', 'SYNTHESIS → FIGURES → DRAFT'],
       title:['从实验记录，走到论文叙事。', 'Turn the experiment record into a paper.'],
-      body:['把文献证据、两轮假设、成功与失败的试验组织成图表与草稿。每个结论回到记录，每一张图服务于问题，而不是只展示最高分。', 'Organize literature, both hypotheses, and successful and failed trials into figures and a draft. Trace each claim to its record; tell the research story, not just the highest score.']
+      body:['Paper Narrative 从 findings 提炼主线：问题、洞见、方法与证据。共享计划接入摘要、Introduction、图序和结尾，再由 Paper Production 组织全文与评审。', 'Paper Narrative turns the findings into one story: question, insight, method, and evidence. A shared plan connects the abstract, introduction, figures, and conclusion; Paper Production carries the manuscript into review.']
     },
     {
       phase:'complete', route:3, directive:'DELIVER', hypothesis:'hypothesis2', h:'RESEARCH RECORD', reflection:'conclude', loop:'loopConclude',
@@ -138,7 +154,7 @@
     ready:['待开始','READY'], baseline:['基线','BASELINE'], keep:['保留 · KEEP','KEEP'],
     revert:['回滚 · REVERT','REVERT'], reflect:['反思 · DEEPEN','DEEPEN'],
     protocol:['计划已更新','PROTOCOL UPDATED'], pending:['待复测','RECHECK'],
-    conclude:['综合收尾','CONCLUDE'], write:['组织叙事','WRITING'], reviewed:['草稿与记录就绪','DRAFT & RECORD READY']
+    conclude:['综合收尾','CONCLUDE'], change:['改动已落实','METHOD REVISED'], write:['组织叙事','WRITING'], reviewed:['草稿与记录就绪','DRAFT & RECORD READY']
   };
   let current = 0, elapsed = 0, lastTime = null, raf = null;
   let visible = false, wantsPlay = !reducedMotion.matches, finished = false;
