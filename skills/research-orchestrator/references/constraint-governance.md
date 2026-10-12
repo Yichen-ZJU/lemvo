@@ -90,8 +90,12 @@ reviewer。
 已消费标签不可重新封存。
 
 工程门仅由机械故障触发（方法未启用/错 loss/无有效梯度/污染 split/指标解析错误）。
-机械健康但 held-out CI 含零 = 该对照/配方未确认收益（CONFIRMATION_NOT_ESTABLISHED
-或 EXPLORATORY_NEGATIVE），不是 IMPLEMENTATION_INVALID，不冻结不相关训练。
+机械健康但 held-out CI 含零 = 该对照/配方**未确认收益**（CONFIRMATION_NOT_ESTABLISHED），
+不是 IMPLEMENTATION_INVALID，不冻结不相关训练。**方向标签与确认状态分开记**：
+按预设 estimand 记录点估计方向、CI 与适用范围——正点估计记 EXPLORATORY_POSITIVE
+（标注"未确认"），CI 含零本身不能推出 EXPLORATORY_NEGATIVE；EXPLORATORY_NEGATIVE
+需要当前配方的实际负向效应证据，不是"未显著"的同义词。同口径改善与另一口径退化
+并记；确认失败与探索正信号可以并列存在。
 正对照要说明检验的是执行能力、可拟合性还是泛化改善，不混用。用户或正式合同批准
 的 Guard 仍执行；认为不合理走变更流程，不在结果出来后私改当前门。
 

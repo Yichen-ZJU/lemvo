@@ -226,12 +226,19 @@ Then aggregate as follows:
   are a revision signal, not an automatic kill — for exploration-stage
   candidates, record the weak dimensions and the smallest change that
   would strengthen one of them.
-- All five dimensions at 4 or below: Reject and Pivot **for the current
-  formulation** — record which claims this verdict covers (scope), and
-  whether a narrower reformulation was considered. Do not extend this
-  verdict to the whole family or direction.
-- No single dimension reaches 7: the idea is vague. Ask the user to
-  name the single dominant axis before re-evaluating.
+- All five dimensions at 4 or below: **stage-dependent**. For paper-maturity
+  assessment this is Reject and Pivot **for the current formulation** — record
+  which claims the verdict covers (scope) and whether a narrower reformulation
+  was considered; never extend it to the whole family or direction. For an
+  exploration-stage candidate, scores drive priority and the minimal
+  construction plan — record the weak dimensions, pick the cheapest
+  strengthening change, and proceed; low scores alone do not strip execution
+  eligibility (economic stop with reasons remains available).
+- No single dimension reaches 7: the idea is vague. In unattended or
+  authorized-handoff runs, determine the dominant axis yourself from the
+  evidence, record the choice and its basis, and continue; ask the user to
+  name the axis only on genuine goal ambiguity in interactive/standalone
+  runs.
 
 ## 8. Summary table
 

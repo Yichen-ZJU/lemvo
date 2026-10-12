@@ -252,7 +252,7 @@ research-state.yaml 的 supported / refuted / inconclusive 字段承担全部
 |---|---|---|
 | IMPLEMENTATION_INVALID | 实现有错/方法未真正启用 | 只否当前实现；修复后重评 |
 | MEASUREMENT_INCONCLUSIVE | 测量在该条件下不可识别信号（样本量、前缀掩盖、灵敏度） | 只否该测量条件；假设保持未决 |
-| EXPLORATORY_POSITIVE / EXPLORATORY_NEGATIVE | dev/探索集上的方向性信号（含 CI） | 影响优先级，不构成确认或否证 |
+| EXPLORATORY_POSITIVE / EXPLORATORY_NEGATIVE | dev/探索集上的**方向性**信号：按预设 estimand 记点估计方向、CI 与适用范围；**CI 含零 ≠ NEGATIVE**——正点估计未确认记 EXPLORATORY_POSITIVE（标"未确认"），NEGATIVE 需实际负向效应证据 | 影响优先级，不构成确认或否证 |
 | CONFIRMATION_NOT_ESTABLISHED | 确认集/新种子未复现 | 只否"已确认"主张，不否探索信号本身 |
 | NOVELTY_OVERLAP | 近邻存在 | 触发 delta 声明（见近邻节），禁止直接关闭 |
 | UNTESTED | 从未运行（被文献门/条件挡住） | **禁止写成阴性**；进待办或明确放弃理由 |

@@ -191,6 +191,98 @@ def read_fields():
     f["project_status"] = project.get("status", "")
     return f, prep, total
 
+def read_budget():
+    """budget 区（unit/total_cap/used/remaining）；缺失字段返回 None。"""
+    out = {"unit": None, "total_cap": None, "used": None, "remaining": None}
+    top = ""
+    try:
+        for raw in open(STATE, encoding="utf-8", errors="replace"):
+            line = strip_inline_comment(raw)
+            m = re.match(r"^(\s*)([A-Za-z_][\w-]*)\s*:\s*(.*)$", line)
+            if not m:
+                continue
+            indent, key, val = len(m.group(1)), m.group(2), m.group(3).strip()
+            if indent == 0:
+                top = key
+            elif top == "budget" and indent == 2 and key in out:
+                out[key] = unquote(val)
+    except OSError:
+        pass
+    return out
+
+def read_plan():
+    """按层级只读 research_plan 区的 version/stage（F4：不做全文件首个匹配）。
+    缺区或缺字段返回 none，不借用其他同名键。"""
+    out = {"version": "none", "stage": "none"}
+    top = ""
+    try:
+        for raw in open(STATE, encoding="utf-8", errors="replace"):
+            line = strip_inline_comment(raw)
+            m = re.match(r"^(\s*)([A-Za-z_][\w-]*)\s*:\s*(.*)$", line)
+            if not m:
+                continue
+            indent, key, val = len(m.group(1)), m.group(2), m.group(3).strip()
+            if indent == 0:
+                top = key
+            elif top == "research_plan" and indent == 2 and key in out:
+                v = unquote(val)
+                if v:
+                    out[key] = v
+    except OSError:
+        pass
+    return out
+
+def num_or_none(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+def cmd_budget_gate():
+    """F2：金额预算派发前闸门。unit=usd 且 cap/used 均为数值且 used >= cap
+    才判耗尽（unknown/缺失不视为耗尽，也不视为无限授权——仅不拦截）。"""
+    b = read_budget()
+    cap, used = num_or_none(b["total_cap"]), num_or_none(b["used"])
+    exhausted = "unknown"
+    if b["unit"] == "usd" and cap is not None and used is not None:
+        exhausted = "yes" if used >= cap else "no"
+    print("BUDGET_UNIT=" + str(b["unit"]))
+    print("BUDGET_CAP=" + str(b["total_cap"]))
+    print("BUDGET_USED=" + str(b["used"]))
+    print("BUDGET_EXHAUSTED=" + exhausted)
+
+def cmd_budget_add():
+    """F2：结算时累计 budget.used。argv: budget-add <increment|unknown>
+    increment 由调用方按成本口径算好（per-call/delta>=0 用 delta；
+    负 delta=基线重置用 reported；unknown 不加）。只动 budget 区，
+    不碰 prep/total 总账。剩余量随 cap 联动；cap 缺失不写 remaining。"""
+    global LINES
+    inc = sys.argv[2] if len(sys.argv) > 2 else "unknown"
+    if inc == "unknown":
+        print("BUDGET_USED_NOW=unknown"); return
+    try:
+        incf = float(inc)
+    except ValueError:
+        print("BUDGET_USED_NOW=unknown"); return
+    b = read_budget()
+    used = num_or_none(b["used"])
+    if used is None:
+        used = 0.0
+    used = round(used + incf, 6)
+    LINES = open(STATE, encoding="utf-8").read().splitlines()
+    set_in("budget", "used", used)
+    cap = num_or_none(b["total_cap"])
+    if cap is not None:
+        set_in("budget", "remaining", round(cap - used, 6))
+    open(STATE, "w", encoding="utf-8").write("\n".join(LINES) + "\n")
+    print("BUDGET_USED_NOW=" + str(used))
+
+def cmd_plan_info():
+    p = read_plan()
+    print("PLAN_STAGE=" + p["stage"])
+    print("PLAN_VERSION=" + p["version"])
+
+
 def init_sections(f, prep, total):
     try:
         lines = open(STATE, encoding="utf-8").read().splitlines()
@@ -519,6 +611,9 @@ if __name__ == "__main__":
     elif cmd == "ledger-append": cmd_ledger_append()
     elif cmd == "resume-fails": cmd_resume_fails()
     elif cmd == "last-authorize-cap": cmd_last_authorize_cap()
+    elif cmd == "budget-gate": cmd_budget_gate()
+    elif cmd == "budget-add": cmd_budget_add()
+    elif cmd == "plan-info": cmd_plan_info()
     else: sys.exit(2)
 PYEOF
   chmod +x "$HELPER" 2>/dev/null || true
@@ -723,17 +818,52 @@ if [ "$PREP_WALL_CAP" != "0" ]; then
   [ "$WALL_OK" = "yes" ] && over_budget "累计墙钟 ${WALL_MIN}min ≥ 上限 ${PREP_WALL_CAP}min" "wall-time"
 fi
 
+# ── 3b) 金额总预算派发前闸门（F2：unit=usd 且 used>=cap → 零调用决策点）──
+BG=$(python3 "$HELPER" budget-gate 2>/dev/null || true)
+BUDGET_EXHAUSTED=$(printf '%s\n' "$BG" | sed -n 's/^BUDGET_EXHAUSTED=//p')
+BUDGET_USED_NOW=$(printf '%s\n' "$BG" | sed -n 's/^BUDGET_USED=//p')
+BUDGET_CAP_NOW=$(printf '%s\n' "$BG" | sed -n 's/^BUDGET_CAP=//p')
+if [ "$BUDGET_EXHAUSTED" = "yes" ]; then
+  say "金额预算耗尽：budget.used=${BUDGET_USED_NOW} ≥ total_cap=${BUDGET_CAP_NOW}（usd）——派发前拦截，本轮不调用引擎"
+  emit_reason "OVER_BUDGET"
+  cat <<MSG
+金额预算决策选项（任选其一，全部留痕）：
+  A) 用户提高上限：编辑 $STATE 的 budget.total_cap（须来源可核对），记 authorize 事件后重跑
+  B) 收窄：修改 scope/ready_blocker 后重跑
+  C) 终止：touch CAMPAIGN-DONE（交付当前状态；预算耗尽 ≠ 方向被证伪，记 untested）
+  D) 查明细：budget.used 由账本逐轮累计（口径见 cost_basis 字段；负 delta=基线重置已按 reported 计）
+MSG
+  OB=$(mktemp)
+  python3 - "$BUDGET_USED_NOW" "$BUDGET_CAP_NOW" <<'PYOB' > "$OB"
+import json, sys, datetime
+print(json.dumps({"type":"over-budget","kind":"budget-exhausted","used":sys.argv[1],
+ "cap":sys.argv[2],"ts":datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")}))
+PYOB
+  helper ledger-append < "$OB" || true; rm -f "$OB"
+  exit 2
+fi
+
 # ── 4) 消息准备 ──
 if [ -n "$CALLER_MSG" ]; then
   [ -f "$CALLER_MSG" ] || { say "调用者消息文件不存在: $CALLER_MSG"; exit 64; }
   MSG_SOURCE="$CALLER_MSG"; MSG_OWNED=no
 else
+  # F4：stage/version 按 research_plan 层级读取（helper plan-info），不做全文件
+  # 首个同名匹配；计划改版后（version 变化）刷新摘要，不沿用过期阶段。
+  PL_STAGE="none"; PL_VER="none"
+  PI=$(python3 "$HELPER" plan-info 2>/dev/null || true)
+  PL_STAGE=$(printf '%s\n' "$PI" | sed -n 's/^PLAN_STAGE=//p'); PL_STAGE=${PL_STAGE:-none}
+  PL_VER=$(printf '%s\n' "$PI" | sed -n 's/^PLAN_VERSION=//p'); PL_VER=${PL_VER:-none}
+  if [ -s "$OWN_SUMMARY" ] && ! grep -q "plan_version=$PL_VER" "$OWN_SUMMARY" 2>/dev/null; then
+    rm -f "$OWN_SUMMARY"   # 版本已变——摘要过期，重建
+  fi
   if [ ! -s "$OWN_SUMMARY" ]; then
     cat > "$OWN_SUMMARY" <<MSG
 状态摘要（冷启动恢复）：
 - 研究目标：$(grep -m1 'objective\|question' "$STATE" 2>/dev/null | cut -d: -f2- || echo 见 STATE)
 - 已消耗：total_turns=$(grep -A3 '^total:' "$STATE" 2>/dev/null | grep total_turns | grep -oE '[0-9]+' | head -1) wall=$(grep 'total_wall_time_min' "$STATE" | cut -d: -f2)
-- 计划阶段/版本：stage=$(s=$(awk '/^  stage:/{print $2;exit}' "$STATE" 2>/dev/null); echo "${s:-none}") plan_version=$(v=$(awk '/^  version:/{print $2;exit}' "$STATE" 2>/dev/null); echo "${v:-none}")（缺 research_plan 区=旧项目，照常运行）
+- 计划阶段/版本：stage=$PL_STAGE plan_version=$PL_VER（缺 research_plan 区=旧项目，照常运行）
+- 约束治理：修订任何 research_plan 约束 = version+1 + research-log.md 写 plan-change（触发/调整哪条/权限依据/旧证据保留范围/下一实验/成本止损/是否需批准）；规则全文见 research-orchestrator 的 constraint-governance.md
 - 上次有效进展：$(grep 'last_informative_observation' "$STATE" 2>/dev/null | cut -d: -f2-)
 - 下一最小 probe：$(grep 'next_min_probe' "$STATE" 2>/dev/null | cut -d: -f2-)
 按 READY_TO_PROBE 判据推进；不满足则写 ready_blocker（含解除条件），不做泛化审计。
@@ -973,6 +1103,15 @@ obj = {"type": e["T_TYPE"], "turn_id": e["T_TURNID"], "sid": e["T_SID"],
 print(json.dumps(obj, ensure_ascii=False))
 PYTURN
 helper ledger-append < "$TURN_F" || true; rm -f "$TURN_F"
+
+# F2：金额总账累计（单一权威 budget 区；负 delta=基线重置按 reported 计；unknown 不加）
+if [ "$COST_DELTA" != "unknown" ]; then
+  BINC="$COST_DELTA"
+  case "$(python3 -c "import sys; sys.exit(0 if float(sys.argv[1]) < 0 else 1)" "$COST_DELTA" 2>/dev/null; echo $?)" in
+    0) BINC="$U_COST";;   # 负 delta = 上报基线重置（如 claude 版本口径差异），按本轮 reported 计
+  esac
+  [ "$BINC" != "unknown" ] && python3 "$HELPER" budget-add "$BINC" >/dev/null 2>&1 || true
+fi
 
 append_engine_logs
 say "本轮 rc=$rc；NEW_PROGRESS=${NEW_PROGRESS:-?}（类型化凭据=${ARTIFACT_TYPED:-?}）；prep=${PREP_TURNS_NOW:-?}/$EFFECTIVE_CAP；total_turns=${TOTAL_TURNS_NOW:-?}；tokens +${U_IN}/+${U_OUT} cache_r=${U_CR} cache_w=${U_CW} cost=${U_COST}(${COST_BASIS},Δ=${COST_DELTA}) modelUsage=${U_MU}；turn=$TURN_ID；session=$SESSION_TAG"
