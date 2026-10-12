@@ -10,6 +10,8 @@ Chronological record of research decisions and actions. Append-only.
   bootstrap    — initial scoping, literature search, hypothesis formation
   inner-loop   — experiment run and result
   outer-loop   — synthesis, reflection, direction decision
+  plan-change  — 限制复审/计划修订（change note 七字段压缩到一行：触发/调整约束id/
+                 权限依据/旧证据保留范围/下一具体实验/成本止损/是否需批准）
   pivot        — change in research direction
   report       — progress presentation generated
   conclude     — decision to finalize and write paper

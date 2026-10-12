@@ -308,11 +308,15 @@ Apply these filters to each candidate:
 
 | Filter | Question | Kill Criterion |
 |--------|----------|----------------|
-| **Explain-It Test** (F10) | Can I state this in two sentences? | If no → idea is not yet clear |
-| **Problem-First Check** (F1) | Is the problem genuine and important? | If no one suffers from this → drop it |
-| **Simplicity Test** (F7) | Is the complexity justified? | If a simpler approach works → simplify or drop |
-| **Stakeholder Check** (F8) | Who benefits? Who might object? | If no clear beneficiary → drop it |
-| **Feasibility** | Can I execute this with available resources? | If clearly infeasible → park it for later |
+| **Explain-It Test** (F10) | Can I state this in two sentences? | If no → restate it once; still unclear → park with a one-line note |
+| **Problem-First Check** (F1) | Is the problem genuine and important? | If no one suffers from this → park it (record why), do not delete |
+| **Simplicity Test** (F7) | Is the complexity justified? | If a simpler approach works → simplify or park |
+| **Stakeholder Check** (F8) | Who benefits? Who might object? | If no clear beneficiary → park it and record the gap; do not silently drop |
+| **Feasibility** | Can I execute this with available resources? | If clearly infeasible → park it for later, or file a scoped resource request |
+
+Parked ideas stay on the written candidate list with their park reason —
+a missing beneficiary or unclear statement is a revision signal, not proof
+the idea is worthless.
 
 ### Phase 3: Refine (Sharpen the Winner)
 

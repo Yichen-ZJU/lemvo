@@ -16,7 +16,7 @@ argument-hint: <topic-or-results-dir> [--venue <venue>] [--type technique|benchm
 
 调 `idea-evaluator`：五维（Higher/Faster/Stronger/Cheaper/Broader）+ 想法生命周期 + 能力匹配 + 致命缺陷审计，输出 reviewer 式判决。**适用性对齐**：idea-evaluator 不适用于"已实现、正在写论文"的任务（其 When-NOT 条款）——已有结果从 Stage 1 开始，本阶段自动跳过，不做二次拒绝闸门；仅有初步构想、未动工时本 stage 强烈建议。
 
-**质量门**：判决为"不值得做"或存在致命缺陷 → 停下来把判决交给用户，不硬写。
+**质量门**：判决为"不值得做"或存在致命缺陷 → 停下来把判决交给用户，不硬写。判决按 idea-evaluator 的 verdict scope 解读——Reject 只覆盖当前表述（formulation），不等于整个课题/方向不可写；探索阶段的未确认信号不进入论文主张，论文只陈述 confirmation 阶段锁定的证据范围。
 
 ### Stage 1 — 逻辑骨架
 

@@ -33,6 +33,37 @@ hypotheses:
   #   parent: null                # null for root, parent ID (e.g., H1) for sub-hypotheses
   #   priority: medium            # high | medium | low
 
+# 可修订研究计划区（增量区；旧项目缺本节照常运行，不造前置门——
+# 语义见 references/constraint-governance.md）
+research_plan:
+  version: 1                      # 计划版本，每次修订 +1（旧关联不覆盖）
+  stage: exploration              # exploration | confirmation
+  goal_ref: ""                    # 目标来源引用（CHARTER 章节/用户消息）
+  approved_envelope_ref: ""       # 已批准资源边界的来源引用——引用 ≠ 授权；
+                                  # 真实授权以 budget/total 总账与原始用户消息为准
+  constraints: []                 # 会阻塞/限制实验的规则条目；普通描述文字不必录入
+  # - id: local_teacher            # 稳定 ID（换 phase/后端不变）
+  #   kind: design_default         # safety_boundary | approved_resource_cap |
+  #                                # availability_snapshot | design_default |
+  #                                # scientific_assumption | confirmation_lock
+  #   statement: "使用当前可用的本地 checkpoint 作 teacher"
+  #   authority: agent_proposed    # user_explicit | safety_inherent |
+  #                                # approved_envelope | agent_proposed |
+  #                                # inferred | needs_source
+  #   source_ref: ""               # 原文位置；代理转述与用户原话分开记录
+  #   source_status: recorded      # recorded | verified | needs_source
+  #   scope: ""                    # 适用对象（配方/家族/阶段）
+  #   stages: [exploration]
+  #   mutable_by: orchestrator_within_envelope
+  #   reconsider_when: [asset_change, shared_blocker, before_close]
+  #   status: active               # proposed | approved | active | retired
+  last_review:
+    trigger: null                 # 本次复审触发（关闭前/换向/共享阻塞/成本上升/新资产/新配方）
+    decision: null                # 结论（含权限依据）
+    change_ref: null              # research-log 中 change note 的条目号
+  next_constructive_experiment: ""  # 复审必须接到的下一项具体建设
+  active_confirmation_ref: null   # 当前确认合同引用（只锁对应实验与数据）
+
 # 准备循环总账（跨会话/重启/后端累计；重命名 phase/slug 不清零）
 prep:
   prep_turns: 0                  # 距上次【有信息量观测】的准备轮数——重置须有 artifact 背书（见 last_informative_artifact），纯文字变化不重置

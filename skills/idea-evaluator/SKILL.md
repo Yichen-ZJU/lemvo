@@ -90,7 +90,9 @@ flaw, cite the detection rule, and recommend a concrete defense.
 severity taxonomy (single-handedly causes rejection, unfixable
 within the lifecycle), stop here and emit the verdict directly:
 
-- Verdict: Reject and Pivot.
+- Verdict: Reject and Pivot **for the affected claim** (scope the
+  rejection to the exact claim the CRITICAL flaw kills; the method
+  family and direction stay open to revised formulations).
 - Output sections 1 (First impression), 2 (Fatal flaws with the
   CRITICAL flaw), and 8 (Verdict with the flaw-driven rationale)
   only.
@@ -280,6 +282,12 @@ Disruptive potential: <none, possible, strong>.
 
 ### 8. Verdict
 **<Strong Accept or Accept with Revisions or Reject and Pivot>**
+
+Verdict scope (REQUIRED): the exact claim/formulation this verdict covers.
+A Reject applies to the current formulation only — never to the whole
+method family or research direction; note the smallest revision that was
+considered and why it was or was not taken (see
+research-orchestrator/references/constraint-governance.md).
 
 Top three actions to take first:
 1. ...

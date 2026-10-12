@@ -733,6 +733,7 @@ else
 状态摘要（冷启动恢复）：
 - 研究目标：$(grep -m1 'objective\|question' "$STATE" 2>/dev/null | cut -d: -f2- || echo 见 STATE)
 - 已消耗：total_turns=$(grep -A3 '^total:' "$STATE" 2>/dev/null | grep total_turns | grep -oE '[0-9]+' | head -1) wall=$(grep 'total_wall_time_min' "$STATE" | cut -d: -f2)
+- 计划阶段/版本：stage=$(s=$(awk '/^  stage:/{print $2;exit}' "$STATE" 2>/dev/null); echo "${s:-none}") plan_version=$(v=$(awk '/^  version:/{print $2;exit}' "$STATE" 2>/dev/null); echo "${v:-none}")（缺 research_plan 区=旧项目，照常运行）
 - 上次有效进展：$(grep 'last_informative_observation' "$STATE" 2>/dev/null | cut -d: -f2-)
 - 下一最小 probe：$(grep 'next_min_probe' "$STATE" 2>/dev/null | cut -d: -f2-)
 按 READY_TO_PROBE 判据推进；不满足则写 ready_blocker（含解除条件），不做泛化审计。

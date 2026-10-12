@@ -43,6 +43,17 @@ This is an execution request, not a request to explain or implement the workflow
 3. **可用资产**：数据集、评测协议、checkpoint、工具库及其获取方式。
 4. **组合候选**：A+B 组合建议，每条附互补理由（为何预期互补而非冗余）
    与 A/B/A+B 对照设计草案。
+5. **配方与限制对照**（recipe & necessity comparison）：对候选设计找最接近的
+   成功方法，逐项对照——输入及额外信息通道（train/teacher/dev/test 各能看到
+   什么）；teacher/student、冻结方式、损失及监督位置；训练规模、适配器/全参、
+   关键超参与**实际报告的资源**（只有论文实际报告的资源才可作配方成本，不能
+   把大算力正文说成小卡 ready）；评测端点、独立单位、baseline 与验证范围；
+   哪些条件有消融/推导支持为必要、哪些只是实现选择、哪些尚不清楚；本地可复用
+   部分、适配变更、剩余差距；**我们额外引入的限制是否有科学/工程/授权依据**；
+   下一项可运行的直接对照。文献未写某限制是重审线索，不是其无必要性的证明；
+   同权重不同上下文不推出 KL 恒零；教师优势可来自训练侧特权信息；不得向训练
+   teacher 提供封存 test 标签（约束语义见 research-orchestrator/references/
+   constraint-governance.md）。
 
 **审计接口（verifier 阶段执行）**：对照 orchestrator 的"近邻不否决"与
 "探索许可"规则检查调研产出的结论表——任何因"已有人做过/仅是重组"而
@@ -129,6 +140,8 @@ Include:
 - Findings organized by question/theme
 - Evidence-backed caveats and disagreements
 - Open questions
+- 方向扫描/选题类调研：Reusable Assets 五段（含"配方与限制对照"——八个子维度见
+  上方契约；仅话题型综述必含，语料型综述可省）
 - No invented sources, results, figures, benchmarks, images, charts, or tables
 
 Before citation, sweep the draft:
@@ -146,7 +159,7 @@ If direct search/no researcher subagents was chosen:
 
 If researcher subagents were used, run the `verifier` agent after the draft exists. This step is mandatory and must complete before any reviewer runs. Do not run the `verifier` and `reviewer` in the same parallel batch:
 
-`Agent(subagent_type="verifier", prompt="Add inline citations to outputs/.drafts/<slug>-draft.md using the research files outputs/.drafts/<slug>-research-*.md as source material. Verify every URL. ALSO audit the conclusion table against the reusable-assets contract: any candidate rejected merely because 'someone did it before / it is only a recombination' must be flagged as a misbuild (the bar is an articulable delta, not novelty of the family); transferable recipes logged only as blockers must be flagged. Write the complete cited brief (with the misbuild audit appended as a final section) to outputs/.drafts/<slug>-cited.md.")`
+`Agent(subagent_type="verifier", prompt="Add inline citations to outputs/.drafts/<slug>-draft.md using the research files outputs/.drafts/<slug>-research-*.md as source material. Verify every URL. ALSO audit the conclusion table against the reusable-assets contract: any candidate rejected merely because 'someone did it before / it is only a recombination' must be flagged as a misbuild (the bar is an articulable delta, not novelty of the family); transferable recipes logged only as blockers must be flagged; for topic scans, check the recipe & necessity comparison covers its eight sub-dimensions and that claimed recipe costs cite actually-reported resources. Write the complete cited brief (with the misbuild audit appended as a final section) to outputs/.drafts/<slug>-cited.md.")`
 
 If the verifier subagent cannot run the misbuild audit (context limits), the lead agent performs it directly on `<slug>-cited.md` before the reviewer step — the audit is mandatory along the actual call chain, not optional.
 

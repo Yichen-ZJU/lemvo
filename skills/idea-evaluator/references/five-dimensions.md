@@ -220,10 +220,16 @@ Then aggregate as follows:
 
 - Top dimension at 8+ and a second dimension at 6+: this is the
   paper's thesis. Emphasise these two in the Introduction.
-- Three or more dimensions at 5 or below: the idea is thin. Either
-  find the dimension where the idea really shines and sharpen it, or
-  pivot.
-- All five dimensions at 4 or below: Reject and Pivot.
+- Three or more dimensions at 5 or below: the idea is thin. Route to
+  revision: find the dimension where the idea really shines and sharpen
+  it, or record a scoped change note and pivot with reasons. Low scores
+  are a revision signal, not an automatic kill — for exploration-stage
+  candidates, record the weak dimensions and the smallest change that
+  would strengthen one of them.
+- All five dimensions at 4 or below: Reject and Pivot **for the current
+  formulation** — record which claims this verdict covers (scope), and
+  whether a narrower reformulation was considered. Do not extend this
+  verdict to the whole family or direction.
 - No single dimension reaches 7: the idea is vague. Ask the user to
   name the single dominant axis before re-evaluating.
 

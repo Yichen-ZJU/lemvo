@@ -50,7 +50,7 @@ argument-hint: <task-description>
 
 - 每次运行开专支：`autoresearch/<tag>`（tag 用日期，如 `jul26`）
 - 每次实验一个 commit；指标改进 → 分支前进（keep）；持平/变差 → `git revert HEAD --no-edit`（discard，**失败保留在历史里供学习，不用 reset**）；崩溃 → 记 `crash`；超时不算崩溃，直接 discard 不重试
-**契约单一来源**：任务包生成与 autoresearch 执行共用 `references/contract.md`（results.tsv 9 列表头、循环边界、crash/revert、Guard、min_delta、日志命名）；模板或本文与其冲突时以契约为准。
+**契约单一来源（包内技术约定）**：任务包生成与 autoresearch 执行共用 `references/contract.md`（results.tsv 9 列表头、循环边界、crash/revert、Guard、min_delta、日志命名）；模板或本文与契约在这些**包内技术约定**上冲突时以契约为准。契约不覆盖人类权限、批准资源上限与全局阶段语义（见 contract.md 头部优先级范围与 research-orchestrator/references/constraint-governance.md）。
 
 - `results.tsv` **不提交 git**，列（与 autoresearch 执行器一致）：`iteration timestamp commit metric delta guard status move description`（TAB 分隔，逗号会在描述里断掉）
 

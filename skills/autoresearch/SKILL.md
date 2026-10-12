@@ -28,7 +28,7 @@ Session files: `autoresearch.md`, `autoresearch.sh`, `autoresearch.jsonl`, `resu
 | 硬停止 | maxIterations / 用户打断 | maxIterations / timeout |
 | 问用户 | 环境选择、计划确认、停滞建议 | 不问（NEVER STOP） |
 
-**被 research-orchestrator 调用时**：视为无人值守 —— Step 1 的续跑/新开询问与 Step 2/3 的交互闸门（AskUserQuestion 环境选择、计划确认）**全部跳过**：orchestrator 的 BOOTSTRAP 双闸门 + state 文件即上游授权，scope/预算/环境/恢复意图以 research-state.yaml 为准。环境沿用调用方已确认的选择或任务包 program.md 的约定；若没有任何已确认配置且无法交互，报 `blocked` 而不是擅自假设。orchestrator 的 Gate 已经做过确认，这里不再二次确认。
+**被 research-orchestrator 调用时**：视为无人值守 —— Step 1 的续跑/新开询问与 Step 2/3 的交互闸门（AskUserQuestion 环境选择、计划确认）**全部跳过**：orchestrator 的 BOOTSTRAP 双闸门 + state 文件即上游授权，scope/预算/环境/恢复意图以 research-state.yaml 为准。环境沿用调用方已确认的选择或任务包 program.md 的约定；若没有任何已确认配置且无法交互，报 `blocked` 而不是擅自假设。orchestrator 的 Gate 已经做过确认，这里不再二次确认。交接携带 `stage / plan_version / 活跃约束 ID / eval contract 命名空间`（program.md 头部 envelope 区）：本循环服从该 envelope，不自建更苛刻的门；plan_version 变化意味着新包版本，本循环不沿用旧版本身份。
 
 ## Step 0: 前置检查
 
@@ -135,6 +135,13 @@ Guard 失败 → 无论指标如何都 revert，记 `guard-fail`。可重试一�
 连续 10 轮无 keep：
 - 交互式 → 停下来向用户汇报趋势和建议
 - 无人值守 → 自动执行升级选步（合并 near-miss / 激进重构 / 换 hypothesis 空间），记入 jsonl
+
+停滞升级选步**只能在当前 envelope（约束清单、预算、eval contract）内**进行。
+升级选步后仍停滞、或判断需要改动 envelope 本身（换评估命名空间、放宽局部
+预算、修订代理自拟的配方默认）→ **交回外循环**：在 results/jsonl 与交接状态
+中写明停滞事实、已尝试的升级、建议的修订点，结束本局部循环，由 orchestrator
+走约束复审产生新版本。局部循环不得自行扩大 envelope 或无限续跑；局部 discard
+只否当前候选，不否整个方向（裁决标签见 orchestrator 裁决语义分层）。
 
 ## Step 5: 收尾
 

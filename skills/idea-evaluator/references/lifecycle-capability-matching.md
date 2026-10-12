@@ -133,7 +133,11 @@ Given a proposed idea and a capability profile:
 - **Extend the lifecycle**. Only feasible in slow-moving subfields;
   dangerous in fast-moving ones.
 - **Switch the idea entirely**. If three or more mismatch flags
-  exist, the idea is a poor fit. Better to pivot than to push.
+  exist, the idea in its current shape is a poor fit for this context.
+  Mismatch flags are a revision signal: first check whether a scoped
+  change (different category, lifecycle, or capability pairing) removes
+  the mismatches; pivot only after recording why no revision removes
+  them. Flag count alone never vetoes a direction.
 
 ## 6. Worked examples
 

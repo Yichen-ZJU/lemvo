@@ -1,10 +1,32 @@
 # Experiment Loop Contract (single source of truth)
 
-Version: 2.0 · 2026-10-03
+Version: 2.1 · 2026-10-12
 Owner: `experiment-forge` generates task packages; `autoresearch` executes
-the loop. **If any other file (SKILL.md, program.md template, docs)
-contradicts this contract, this file wins.** Changes here must be
-propagated to both skills in the same commit.
+the loop. **优先级范围**：本契约只对**包内技术约定**（results.tsv schema、
+日志命名、局部循环规则、crash/guard/min_delta 协议）是单一来源——这些与
+SKILL.md/program.md 冲突时以本契约为准。**本契约不覆盖**：人类明确权限与
+安全边界、已批准的资源上限（envelope）、全局阶段语义与约束治理（见
+research-orchestrator/references/constraint-governance.md）——那些来自用户
+与 orchestrator 主控，包内任何文件不得以"契约优先"改写它们。Changes here
+must be propagated to both skills in the same commit.
+
+## 0. Envelope 与计划版本（REQUIRED，v2.1 新增）
+
+每个实验包携带上游交接的四个字段（写在 program.md 头部与 package 的
+contract 副本注释中）：
+
+- `stage`：exploration | confirmation（继承 research_plan.stage）；
+- `plan_version`：交接时的 research_plan.version；外循环修订计划后产生
+  **新包版本**，旧包的 evaluator/冻结协议不在同一 loop 内改动；
+- `constraint_ids`：交接时活跃的约束 ID 清单（research-state.yaml
+  research_plan.constraints）；包内不得新增比清单更苛刻的准入条件；
+- `eval_contract`：评测合同命名空间（指标/split/判据的命名标识）；换
+  metric/split/数据集 = 新命名空间 + 新版本，旧 best_value 与旧对照保留，
+  不跨命名空间比较收益。
+
+局部循环服从 envelope：maxIterations/timeout/min_delta 是**本次交接的
+局部约定**，执行期间必须兑现；需要调整时由外循环产生新版本，不在循环内
+静默放宽。停滞（见 §2）升级为外循环修订信号，不是局部无限续跑的理由。
 
 ## 1. results.tsv schema (TAB-separated, never commas)
 

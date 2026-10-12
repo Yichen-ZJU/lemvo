@@ -2,9 +2,25 @@
 
 > Authoritative loop contract: `references/contract.md` inside this
 > package (copied from `experiment-forge/references/contract.md` at
-> forge time). If this template and the contract ever disagree, the
-> contract wins. Schema, bounds, crash/revert, Guard, min_delta and
-> log naming are all defined there.
+> forge time). If this template and the contract ever disagree on
+> **package-internal technical conventions** (schema, log naming, loop
+> rules), the contract wins. Neither overrides human permissions,
+> approved resource caps, or global stage semantics.
+
+## Handoff envelope (v2.1, filled at forge/handoff time)
+
+- stage: <exploration | confirmation>        # from research_plan.stage
+- plan_version: <N>                          # research_plan.version at handoff
+- constraint_ids: <id1, id2, ...>            # active constraints; the package
+                                             # must not add stricter admission gates
+- eval_contract: <namespace@version>         # metric/split/criteria identity;
+                                             # changing any of these = new namespace
+                                             # + new version; old best_value and
+                                             # old comparisons are preserved
+
+Outer-loop plan revisions create a NEW package version — the frozen
+evaluator/protocol of an in-flight loop is never edited silently inside
+that loop.
 
 
 This repo is an autonomous research task. You (the agent) are the researcher. The human sets the direction; you run experiments indefinitely until interrupted.
@@ -72,7 +88,8 @@ iteration	timestamp	commit	metric	delta	guard	status	move	description
 
 The full schema and loop rules live in one place: see the experiment
 loop contract (`experiment-forge/references/contract.md`). If this
-template ever disagrees with the contract, the contract wins.
+template ever disagrees with the contract on package-internal technical
+conventions, the contract wins (scope per contract header).
 
 ## The experiment loop
 
