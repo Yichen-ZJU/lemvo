@@ -29,6 +29,8 @@
 #   lemvo-run.sh advance <projdir> [steer文件]     # owner 活跃=提交请求；无 owner=锁下单轮
 #   lemvo-run.sh switch  <projdir> guided|unattended  # 双向；切 unattended 时无 owner 自动拉起
 #   lemvo-run.sh steer   <projdir> <消息文件>       # 入不可变队列（原子发布）
+#   lemvo-run.sh purge   <projdir>                  # 毒会话/空转救援：归档会话与轮证据、清 SID、
+#                                                   # 保留 STATE/预算/产物；活 owner 须先停
 #   lemvo-run.sh status  <projdir>
 set -uo pipefail
 CMD="${1:-}"; PROJ="${2:-}"
@@ -510,6 +512,47 @@ dispatch_step() {  # 派发单轮；捕获引擎 stdout 解析结构化 reason�
   rm -f "$logf"
   return $rc
 }
+
+# ── purge（BUG-3 救援：毒会话/空转后的干净重启点；不重置预算与产物）──
+if [ "$CMD" = "purge" ]; then
+  if owner_alive; then
+    echo "owner 仍活跃（pid=$(owner_pid)）——先正常停止控制器（kill $(owner_pid)）再 purge"; exit 1
+  fi
+  TS=$(date -u +%Y%m%dT%H%M%SZ)
+  ARC="poisoned-archive-$TS"
+  # 在飞 adapter/engine：按 engine.json 的 pid+starttime 核验后才杀（防误杀）
+  TA=.autoloop-turn-active
+  if [ -f "$TA" ]; then
+    APID=$(cut -d'|' -f2 "$TA"); AST=$(cut -d'|' -f3 "$TA")
+    if [ -n "$APID" ] && kill -0 "$APID" 2>/dev/null && [ "$(pid_start "$APID" 2>/dev/null)" = "$AST" ]; then
+      kill "$APID" 2>/dev/null && echo "已终止在飞 adapter pid=$APID（身份核验通过）"
+    fi
+  fi
+  for TD in turns/*/; do
+    EJ="${TD}engine.json"
+    [ -f "$EJ" ] || continue
+    EP=$(python3 -c 'import json,sys
+try:
+ d=json.load(open(sys.argv[1])); print(d.get("pid_engine","")); print(d.get("pid_engine_start",""))
+except Exception: print("");print("")' "$EJ" 2>/dev/null)
+    EPID=$(printf '%s\n' "$EP" | sed -n 1p); EPST=$(printf '%s\n' "$EP" | sed -n 2p)
+    if [ -n "$EPID" ] && kill -0 "$EPID" 2>/dev/null && [ "$(pid_start "$EPID" 2>/dev/null)" = "$EPST" ]; then
+      kill "$EPID" 2>/dev/null && echo "已终止孤儿引擎 pid=$EPID（身份核验通过）"
+    fi
+  done
+  mkdir -p "$ARC"
+  for X in turns .lemvo-receipts .autoloop-session-id .autoloop-summary.md \
+           .autoloop-stall-count .autoloop-poison-count .autoloop-turn-active .autoloop-engine.pid; do
+    [ -e "$X" ] && mv "$X" "$ARC/"
+  done
+  # 账本保留但归档副本（预算连续性不动 research-state.yaml）
+  [ -f .autoloop-prep-ledger.jsonl ] && cp .autoloop-prep-ledger.jsonl "$ARC/"
+  printf '{"type":"purge","ts":"%s","archive":"%s","note":"session/turns archived; budget & state kept"}\n' \
+    "$TS" "$ARC" >> .autoloop-prep-ledger.jsonl 2>/dev/null || true
+  echo "$(date -u +%FT%TZ) purge → $ARC（SID/轮证据/计数归档；STATE 与预算未动）" >> campaign_log.txt 2>/dev/null || true
+  echo "purge 完成：$ARC（重启前建议检查 ledger 中 session-poisoned 记录与 config 预检）"
+  exit 0
+fi
 
 # ── advance（owner 活跃=提交请求；无 owner=锁下与主循环同一步骤）──
 if [ "$CMD" = "advance" ]; then

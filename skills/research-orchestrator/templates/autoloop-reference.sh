@@ -1,5 +1,19 @@
 #!/usr/bin/env bash
-# 参考外层循环脚本 v4.5（round-23：运行时可靠性——整轮占有权、错误分类、JSON 计量收口、幂等回收）
+# 参考外层循环脚本 v4.6（round-26：codex 线联调六缺陷修复）
+#  v4.6 变更（对 v4.5，均带探针）：
+#  BUG-1 bootstrap：STATE 缺失 → 首轮消息改 bootstrap 指令（建 STATE+首个产物），
+#    不再 READY 循环模板；settle/account/budget-add 对缺失 STATE 不崩溃；
+#    连续 5 轮零产物（引擎 rc=0 礼貌空转）→ rc2 决策点（STALL_NO_ARTIFACT）。
+#  BUG-2 codex 沙箱：exec 显式 -s ${CODEX_SANDBOX:-workspace-write}（0.16x 默认
+#    只读+审批与无人值守不兼容）；不默认 danger-full-access。
+#  BUG-3 毒会话：连续 3 轮阻塞话术+零产物 → 清 SID 强制新会话（session-poisoned
+#    事件入账）；--recover 不收养有 poison 记录的 SID；lemvo-run 新增 purge 命令。
+#  BUG-4 codex ≥0.162 计量：turn.completed usage 为会话累计值 → 按 SID 从账本
+#    求当轮差值（负差=基线重置按当轮值计）；字段含 cache_write_input_tokens。
+#  BUG-5 预检：config 含 service_tier="default" 警告（部分 0.16x 环境拒载、
+#    实测有分歧，不一律拒跑）；exec 错误文本含 unknown variant/无效 config 时
+#    精确判 CONFIG_INVALID rc64；approval/sandbox 键落在 TOML 节内 → 警告。
+#  BUG-6 预检：git 仓库缺 user.email → 从 global 复制 repo-local；都无则 rc64。
 # v4.5 变更（对 v4.4）：
 #  R2/R3 整轮占有权与孤儿回收：turns/<turn_id>/ 持久 manifest；引擎输出落
 #    turn 目录（engine-stdout.jsonl / engine-stderr.log）；.autoloop-turn-active
@@ -29,7 +43,7 @@
 #  引擎身份在 cd 后读取、双引擎适配、结构化 rc6/7 映射。
 # 红线：替换活体战役脚本前先备份；对在跑进程只观察不杀。
 set -uo pipefail
-HELPER_VERSION="4.5"
+HELPER_VERSION="4.6"
 
 # ── --init 模式 ──
 if [ "${1:-}" = "--init" ]; then
@@ -119,10 +133,10 @@ python3 -c "import sys; v=float(sys.argv[1]); sys.exit(0 if v>=0 else 1)" "$PREP
 write_helper() {
   cat > "$HELPER" <<'PYEOF'
 #!/usr/bin/env python3
-"""autoloop v4.5 助手（HELPER_VERSION 4.5）。py3.6 兼容，标准库 only。"""
+"""autoloop v4.6 助手（HELPER_VERSION 4.6）。py3.6 兼容，标准库 only。"""
 import fnmatch, hashlib, json, os, re, sys
 
-HELPER_VERSION = "4.5"
+HELPER_VERSION = "4.6"
 STATE = "research-state.yaml"
 BLOCKING = {"HOLD", "STOPPED", "PAUSED", "EVIDENCE_HOLD", "STOPPED_INCONCLUSIVE",
             "BLOCKED", "BLOCKED_USER"}
@@ -264,6 +278,8 @@ def cmd_budget_add():
         incf = float(inc)
     except ValueError:
         print("BUDGET_USED_NOW=unknown"); return
+    if not os.path.exists(STATE):
+        print("BUDGET_USED_NOW=state-missing"); return
     b = read_budget()
     used = num_or_none(b["used"])
     if used is None:
@@ -392,8 +408,13 @@ def cmd_block_check():
     print("WAITING=" + ("yes" if any(s.upper() == "WAITING_RESOURCE" for s in states if s) else "no"))
 
 def cmd_settle():
-    """S1 凭据类型化：进展 = artifact 匹配建设类白名单 且 sha 变化。"""
+    """S1 凭据类型化：进展 = artifact 匹配建设类白名单 且 sha 变化。
+    BUG-1：STATE 缺失（新战役 bootstrap 期间）不崩溃——记无进展并输出默认值。"""
     global LINES
+    if not os.path.exists(STATE):
+        print("NEW_PROGRESS=no"); print("ARTIFACT_TYPED=no")
+        print("PREP_TURNS_NOW=0"); print("TOTAL_TURNS_NOW=0")
+        print("STATE_MISSING=yes"); return
     f, prep, total = read_fields()
     init_sections(f, prep, total)
     artifact = prep.get("last_informative_artifact", "none")
@@ -430,8 +451,11 @@ def cmd_settle():
     print("TOTAL_TURNS_NOW=" + str(total_turns))
 
 def cmd_account():
-    """S5：墙钟秒 + token（unknown 允许）。argv: account <elapsed_sec> <in|unknown> <out|unknown>"""
+    """S5：墙钟秒 + token（unknown 允许）。argv: account <elapsed_sec> <in|unknown> <out|unknown>
+    BUG-1：STATE 缺失时不崩溃，跳过写账（bootstrap 首轮后可写）。"""
     global LINES
+    if not os.path.exists(STATE):
+        print("WALL_NOW=state-missing"); return
     elapsed = float(sys.argv[2])
     tin, tout = sys.argv[3], sys.argv[4]
     f, prep, total = read_fields()
@@ -452,19 +476,32 @@ def cmd_account():
     print("WALL_NOW=" + str(wall))
 
 def cmd_usage_from():
-    """v4.5：只从 JSON 事件的 usage/token_usage 容器解析；input/output/
+    """v4.6：只从 JSON 事件的 usage/token_usage 容器解析；input/output/
     cache_read/cache_write 分列，逐字段判存在——缺失保留 unknown 不补 0；
     total_cost_usd 走 JSON 数值（科学计数法不截断）；modelUsage 子树存在性
-    单独标注（其口径与主 usage 不同，费用须带 scope）。"""
+    单独标注（其口径与主 usage 不同，费用须带 scope）。
+    BUG-4：codex ≥0.162 的 turn.completed usage 是【会话累计值】（字段
+    input_tokens/cached_input_tokens/cache_write_input_tokens/output_tokens/
+    reasoning_output_tokens）。argv: usage-from <file> [sid] [engine]
+    engine=codex 且有 sid 时按 SID 从账本取上次累计求差（与 cost-delta 同
+    构）；负差=基线重置按当轮累计计。旧版 codex（逐轮值）不受影响——
+    账本中无同 SID 累计基线时以当轮值为基线。"""
+    engine = sys.argv[4] if len(sys.argv) > 4 else ""
+    sid = sys.argv[3] if len(sys.argv) > 3 else "none"
     sums = {"in": 0, "out": 0, "cr": 0, "cw": 0}
     seen = {"in": False, "out": False, "cr": False, "cw": False}
+    cum = {"in": None, "out": None, "cr": None, "cw": None}
     cost = None
     modelusage = False
     def acc(u, keys, sk):
         for k in keys:
             v = u.get(k)
             if isinstance(v, (int, float)):
-                sums[sk] += int(v); seen[sk] = True
+                if engine == "codex":
+                    cum[sk] = int(v)   # 累计语义：取最后值，不相加
+                else:
+                    sums[sk] += int(v)
+                seen[sk] = True
                 return
     try:
         for ln in open(sys.argv[2], encoding="utf-8", errors="replace"):
@@ -492,10 +529,33 @@ def cmd_usage_from():
                 modelusage = True
     except OSError:
         pass
-    print("TOKENS_IN=%s" % (sums["in"] if seen["in"] else "unknown"))
-    print("TOKENS_OUT=%s" % (sums["out"] if seen["out"] else "unknown"))
-    print("CACHE_READ=%s" % (sums["cr"] if seen["cr"] else "unknown"))
-    print("CACHE_WRITE=%s" % (sums["cw"] if seen["cw"] else "unknown"))
+    # codex 累计 → 当轮差值（基线从账本同 SID 最近一条带 codex_cum 的事件取）
+    if engine == "codex" and sid != "none" and any(v is not None for v in cum.values()):
+        prev = {}
+        for ev in ledger_events():
+            cc = ev.get("codex_cum")
+            if ev.get("sid") == sid and isinstance(cc, dict):
+                prev = cc
+        out_vals = {}
+        for sk in ("in", "out", "cr", "cw"):
+            cur = cum[sk]
+            if cur is None:
+                out_vals[sk] = "unknown"; continue
+            pv = prev.get(sk)
+            if isinstance(pv, (int, float)) and cur >= int(pv):
+                out_vals[sk] = cur - int(pv)
+            else:
+                out_vals[sk] = cur   # 无基线或回退（新会话/基线重置）→ 当轮=累计值
+        print("TOKENS_IN=%s" % out_vals["in"])
+        print("TOKENS_OUT=%s" % out_vals["out"])
+        print("CACHE_READ=%s" % out_vals["cr"])
+        print("CACHE_WRITE=%s" % out_vals["cw"])
+        print("CODEX_CUM=" + json.dumps(cum, separators=(",", ":")))
+    else:
+        print("TOKENS_IN=%s" % (sums["in"] if seen["in"] else "unknown"))
+        print("TOKENS_OUT=%s" % (sums["out"] if seen["out"] else "unknown"))
+        print("CACHE_READ=%s" % (sums["cr"] if seen["cr"] else "unknown"))
+        print("CACHE_WRITE=%s" % (sums["cw"] if seen["cw"] else "unknown"))
     print("COST_USD=%s" % (repr(cost) if cost is not None else "unknown"))
     print("MODELUSAGE=%s" % ("present" if modelusage else "absent"))
 
@@ -640,18 +700,19 @@ pid_start() {
 }
 
 # ── usage 解析（v4.5：分列 + cost JSON 数值 + modelUsage 存在性）──
-U_IN=unknown; U_OUT=unknown; U_CR=unknown; U_CW=unknown; U_COST=unknown; U_MU=absent
-parse_usage() {  # $1=引擎 stdout 文件
-  U_IN=unknown; U_OUT=unknown; U_CR=unknown; U_CW=unknown; U_COST=unknown; U_MU=absent
+U_IN=unknown; U_OUT=unknown; U_CR=unknown; U_CW=unknown; U_COST=unknown; U_MU=absent; U_CUM=""
+parse_usage() {  # $1=引擎 stdout 文件 $2=当前SID（codex 累计差分用）
+  U_IN=unknown; U_OUT=unknown; U_CR=unknown; U_CW=unknown; U_COST=unknown; U_MU=absent; U_CUM=""
   [ -f "$1" ] || return 0
   local u v
-  u=$(python3 "$HELPER" usage-from "$1" 2>/dev/null || true)
+  u=$(python3 "$HELPER" usage-from "$1" "${2:-none}" "$ENGINE" 2>/dev/null || true)
   v=$(printf '%s\n' "$u" | grep -oE 'TOKENS_IN=[0-9]+' | cut -d= -f2); [ -n "$v" ] && U_IN="$v"
   v=$(printf '%s\n' "$u" | grep -oE 'TOKENS_OUT=[0-9]+' | cut -d= -f2); [ -n "$v" ] && U_OUT="$v"
   v=$(printf '%s\n' "$u" | grep -oE 'CACHE_READ=[0-9]+' | cut -d= -f2); [ -n "$v" ] && U_CR="$v"
   v=$(printf '%s\n' "$u" | grep -oE 'CACHE_WRITE=[0-9]+' | cut -d= -f2); [ -n "$v" ] && U_CW="$v"
   v=$(printf '%s\n' "$u" | grep -oE 'COST_USD=[0-9.eE+-]+' | cut -d= -f2); [ -n "$v" ] && U_COST="$v"
   v=$(printf '%s\n' "$u" | grep -oE 'MODELUSAGE=[a-z]+' | cut -d= -f2); [ -n "$v" ] && U_MU="$v"
+  v=$(printf '%s\n' "$u" | sed -n 's/^CODEX_CUM=//p'); [ -n "$v" ] && U_CUM="$v"
   return 0
 }
 append_engine_logs() {  # 原始 stdout/stderr 全量入 campaign_log（服务失败也不丢）
@@ -677,6 +738,11 @@ except Exception: print("")' "$TD" 2>/dev/null)
            || grep -h -oE '"thread_id"[": ]+[a-f0-9-]{8,}' "$OUT" 2>/dev/null | head -1 | grep -oE '[a-f0-9]{8}-[a-f0-9-]+' \
            || grep -h -oiE 'session( id|_id)?: [a-f0-9-]{8,}' "$OUT" 2>/dev/null | head -1 | grep -oE '[a-f0-9]{8}-[a-f0-9-]+' \
            || true)
+  fi
+  # BUG-3：毒会话不复活——账本有该 SID 的 session-poisoned 事件则不收养
+  if [ -n "$NEW_SID" ] && grep -q "\"session-poisoned\".*\"$NEW_SID\"" "$LEDGER" 2>/dev/null; then
+    say "recover：SID $NEW_SID 有 session-poisoned 记录——不收养（防毒会话复活）"
+    NEW_SID=""
   fi
   [ -n "$NEW_SID" ] && echo "$NEW_SID" > "$SID_FILE"
   helper init >/dev/null 2>&1 || true
@@ -742,6 +808,31 @@ for f in STOP HOLD CAMPAIGN-DONE BLOCKED-USER; do
     exit 0
   fi
 done
+
+# ── 0b) 预检（ZCode 联调缺陷 BUG-5/6：config 兼容与 git 身份——失败要响，不静默）──
+if [ "$ENGINE" = "codex" ]; then
+  CODEX_CFG="${CODEX_HOME:-$HOME/.codex}/config.toml"
+  if [ -f "$CODEX_CFG" ]; then
+    # BUG-5：service_tier="default" 在部分 0.16x 环境拒载、在另一些正常（实测
+    # 分歧）——预检只警告；真失败由 exec 错误文本精确识别（见 §7 分类）。
+    grep -qE '^service_tier\s*=\s*"default"' "$CODEX_CFG" 2>/dev/null && \
+      say "预检提示：config 含 service_tier=\"default\"——部分 codex 0.16x 环境拒载该值（若 exec 报 unknown variant 请注释或改 fast/flex）"
+    # TOML 节错位：approval_policy/sandbox_mode 落在 [mcp_servers.*] 等节内会被 codex 忽略
+    MISPLACED=$(awk '/^\[/{sec=$0} /^[[:space:]]*(approval_policy|sandbox_mode)[[:space:]]*=/ && sec != "" && sec !~ /^\[(tui|notice|features|projects)/ {print NR": "sec" -> "$0}' "$CODEX_CFG" 2>/dev/null | head -3)
+    [ -n "$MISPLACED" ] && say "预检警告：codex config 键落在 TOML 节内将被忽略（应放文件顶部顶层）：$MISPLACED"
+  fi
+fi
+if [ -d .git ]; then
+  if ! git config user.email >/dev/null 2>&1; then
+    if [ -n "$(git config --global user.email 2>/dev/null)" ]; then
+      git config user.email "$(git config --global user.email)" && git config user.name "$(git config --global user.name 2>/dev/null || echo lemvo)" \
+        && say "预检：git 身份缺失——已从 global 复制到本仓（repo-local）"
+    else
+      say "预检失败：本目录是 git 仓库但无 user.email（提交会静默失败）——设 global 或 repo-local 身份后重跑"
+      emit_reason "CONFIG_INVALID"; exit 64
+    fi
+  fi
+fi
 
 # ── 1) 初始化 + 读取状态 ──
 helper init >/dev/null || exit 4
@@ -847,6 +938,22 @@ fi
 if [ -n "$CALLER_MSG" ]; then
   [ -f "$CALLER_MSG" ] || { say "调用者消息文件不存在: $CALLER_MSG"; exit 64; }
   MSG_SOURCE="$CALLER_MSG"; MSG_OWNED=no
+elif [ ! -f "$STATE" ]; then
+  # BUG-1：全新战役目录无 STATE——给 bootstrap 指令而非 READY 循环模板
+  #（否则引擎只能"写 blocker 并结束"，造成无限礼貌空转）。
+  cat > "$OWN_SUMMARY" <<'MSG'
+【首次启动：bootstrap】这是新战役目录，没有 research-state.yaml。
+本轮任务（按序完成，不要只写 blocker 等待）：
+1. 读 CHARTER.md / 任务书 / prompt（若存在）提取研究目标与边界；
+2. 按 research-orchestrator 模板创建 research-state.yaml（project/prep/total/
+   budget/research_plan 区，目标与约束来源如实标注）；
+3. 创建 findings.md 与 research-log.md（模板结构即可）；
+4. 开始第一项有产物的实际工作（文献摸底、代码脚手架或最小实验），
+   把产物路径写进 research-log.md。
+若连 CHARTER/任务书都不存在：写明"缺任务定义"并落 BLOCKED-USER 文件（含需要
+用户提供的具体内容），不要空转。
+MSG
+  MSG_SOURCE="$OWN_SUMMARY"; MSG_OWNED=yes
 else
   # F4：stage/version 按 research_plan 层级读取（helper plan-info），不做全文件
   # 首个同名匹配；计划改版后（version 变化）刷新摘要，不沿用过期阶段。
@@ -900,6 +1007,7 @@ d = {"adapter_pid": apid, "adapter_start": astart, "engine": eng, "status": "run
 json.dump(d, open(p, "w"), indent=1)
 PYE
 echo "$TURN_ID|$$|$ADAPTER_START" > .autoloop-turn-active
+touch "$TD/.turn-start"   # BUG-3：本轮产物判定的 mtime 基准
 trap 'rm -f .autoloop-turn-active .autoloop-engine.pid' EXIT
 
 # ── result.json（E-result：结果驱动闭环的每轮凭据）──
@@ -945,9 +1053,9 @@ run_engine() {
   else
     if [ -s "$SID_FILE" ]; then
       SID="$(cat "$SID_FILE")"
-      codex exec --skip-git-repo-check --json resume "$SID" "$(cat "$MSG_SOURCE")" < /dev/null > "$TD/engine-stdout.jsonl" 2> "$TD/engine-stderr.log" &
+      codex exec --skip-git-repo-check --json -s "$CODEX_SANDBOX" resume "$SID" "$(cat "$MSG_SOURCE")" < /dev/null > "$TD/engine-stdout.jsonl" 2> "$TD/engine-stderr.log" &
     else
-      codex exec --skip-git-repo-check --json "$(cat "$MSG_SOURCE")" < /dev/null > "$TD/engine-stdout.jsonl" 2> "$TD/engine-stderr.log" &
+      codex exec --skip-git-repo-check --json -s "$CODEX_SANDBOX" "$(cat "$MSG_SOURCE")" < /dev/null > "$TD/engine-stdout.jsonl" 2> "$TD/engine-stderr.log" &
     fi
   fi
   engpid=$!
@@ -964,7 +1072,14 @@ PYEP
 }
 CLAUDE_PERMS="${CLAUDE_PERMS_EXTRA:-}"   # 窄白名单入口（如 --allowedTools ...）；不受信任目录下项目 settings 会被忽略，CLI 级白名单不受影响
 [ "${CLAUDE_SKIP_PERMS:-0}" = "1" ] && CLAUDE_PERMS="--dangerously-skip-permissions"
+CODEX_SANDBOX="${CODEX_SANDBOX:-workspace-write}"   # BUG-2：0.16x exec 默认只读+需审批；显式给可写工作区（campaign 目录=cwd）；不要用 danger-full-access 做全局默认
 run_engine
+
+# BUG-3：产物判定在引擎结束后立即做（settle/account 的账本书写不算研究产物；
+# 引擎对 research-state.yaml 的真实编辑算产物）
+NEW_ARTIFACT=""
+[ -f "$TD/.turn-start" ] && NEW_ARTIFACT=$(find . -maxdepth 2 -type f -newer "$TD/.turn-start" \
+  -not -path "./.*" -not -path "./turns/*" 2>/dev/null | head -1)
 
 # ── 6) 会话 ID 提取（claude session_id | codex thread_id | 文本三拼写）──
 NEW_SID=$( grep -h -oE '"session_id"[": ]+[a-f0-9-]{8,}' "$TD/engine-stdout.jsonl" "$TD/engine-stderr.log" 2>/dev/null | head -1 | grep -oE '[a-f0-9]{8}-[a-f0-9-]+' \
@@ -976,9 +1091,18 @@ CUR_SID="$(cat "$SID_FILE" 2>/dev/null || true)"
 
 # ── 7) 失败分类（A1 收口：服务/账号错误 ≠ 会话死亡 ≠ 研究停滞）──
 if [ "$rc" -ne 0 ]; then
+  # BUG-5：config 拒载优先于服务分类（unknown variant / unrecognized setting 致 exec 未起）
+  if grep -qiE "unknown variant|unrecognized configuration|invalid.*config|failed to (parse|load).*config" "$TD/engine-stdout.jsonl" "$TD/engine-stderr.log" 2>/dev/null; then
+    say "配置类错误（codex config 拒载/无效键）——不修引擎不改状态，修 config 后重跑"
+    parse_usage "$TD/engine-stdout.jsonl" "${CUR_SID:-none}"
+    finalize_engine_json "config-error"
+    write_result "failed" "needs_user" "$rc"
+    emit_reason "CONFIG_INVALID"
+    exit 64
+  fi
   if grep -qiE 'rate.?limit|quota|billing|payment|429|500|502|503|504|401|403|unauthorized|forbidden|internal server error|overloaded|service unavailable|temporarily|timed.?out|timeout|ECONNRESET|network' "$TD/engine-stdout.jsonl" "$TD/engine-stderr.log" 2>/dev/null; then
     say "服务/账号类错误（限流/认证/基础设施）——保留 SID，不计 resume-fail；计量尽力而为"
-    parse_usage "$TD/engine-stdout.jsonl"
+    parse_usage "$TD/engine-stdout.jsonl" "${CUR_SID:-none}"
     python3 "$HELPER" account "$(( $(date +%s) - TURN_START ))" "$U_IN" "$U_OUT" >/dev/null 2>&1 || true
     SE=$(mktemp)
     printf '{"type":"service-error","turn_id":"%s","sid":"%s","rc":%d,"tokens_in":"%s","tokens_out":"%s","cache_read":"%s","cache_write":"%s","cost_usd_est":"%s","ts":"%s"}\n' \
@@ -1049,7 +1173,7 @@ fi
 # ── 8) 结算（凭据类型化 + 真账 + usage 分列 + 费用 delta 口径）──
 SETTLE=$(mktemp); helper settle > "$SETTLE" || { rm -f "$SETTLE"; say "结算失败——保留输出，账未更新"; }
 . "$SETTLE" 2>/dev/null || true; rm -f "$SETTLE"
-parse_usage "$TD/engine-stdout.jsonl"
+parse_usage "$TD/engine-stdout.jsonl" "${CUR_SID:-none}"
 TURN_ELAPSED=$(( $(date +%s) - TURN_START ))
 python3 "$HELPER" account "$TURN_ELAPSED" "$U_IN" "$U_OUT" >/dev/null \
   || printf 'accounting-error\tcmd=account\tdt=%s\n' "$(date -u +%FT%TZ)" >> "$LEDGER"
@@ -1073,7 +1197,7 @@ T_TYPE="work-turn"; [ "${NEW_PROGRESS:-no}" != "yes" ] && T_TYPE="prep-turn"
 T_PREP="${PREP_TURNS_NOW:-unknown}"; T_TOTAL="${TOTAL_TURNS_NOW:-unknown}"
 T_SCOPE="client-estimate;modelUsage=$U_MU;engine=$ENGINE"
 T_TYPE="$T_TYPE" T_PREP="$T_PREP" T_TOTAL="$T_TOTAL" T_IN="$U_IN" T_OUT="$U_OUT" \
-T_CR="$U_CR" T_CW="$U_CW" T_COST="$U_COST" T_DELTA="$COST_DELTA" T_BASIS="$COST_BASIS" \
+T_CR="$U_CR" T_CW="$U_CW" T_COST="$U_COST" T_DELTA="$COST_DELTA" T_BASIS="$COST_BASIS" T_CUM="$U_CUM" \
 T_SCOPE="$T_SCOPE" T_WALL="$TURN_ELAPSED" T_SID="$SESSION_TAG" T_TURNID="$TURN_ID" T_ART="$T_ART" \
 python3 - <<'PYTURN' > "$TURN_F"
 import json, os, datetime
@@ -1097,6 +1221,7 @@ obj = {"type": e["T_TYPE"], "turn_id": e["T_TURNID"], "sid": e["T_SID"],
        "cache_read": num(e["T_CR"]), "cache_write": num(e["T_CW"]),
        "cost_usd_reported": num(e["T_COST"]), "cost_usd_delta": num(e["T_DELTA"]),
        "cost_basis": e["T_BASIS"], "cost_scope": e["T_SCOPE"],
+       "codex_cum": (json.loads(e["T_CUM"]) if e.get("T_CUM") else None),
        "wall_sec": iv(e["T_WALL"]), "wall_scope": "engine-call",
        "artifact_ref": e["T_ART"],
        "ts": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")}
@@ -1115,6 +1240,41 @@ fi
 
 append_engine_logs
 say "本轮 rc=$rc；NEW_PROGRESS=${NEW_PROGRESS:-?}（类型化凭据=${ARTIFACT_TYPED:-?}）；prep=${PREP_TURNS_NOW:-?}/$EFFECTIVE_CAP；total_turns=${TOTAL_TURNS_NOW:-?}；tokens +${U_IN}/+${U_OUT} cache_r=${U_CR} cache_w=${U_CW} cost=${U_COST}(${COST_BASIS},Δ=${COST_DELTA}) modelUsage=${U_MU}；turn=$TURN_ID；session=$SESSION_TAG"
+
+# ── BUG-3：空转/毒会话检测（引擎 rc=0 也会空转——礼貌 loop 无产物无进展）──
+# NEW_ARTIFACT 已在引擎结束时判定（不含账本/控制器写入）
+if [ -z "$NEW_ARTIFACT" ]; then
+  STALL_N=$(( $(cat .autoloop-stall-count 2>/dev/null || echo 0) + 1 )); echo "$STALL_N" > .autoloop-stall-count
+else
+  echo 0 > .autoloop-stall-count; echo 0 > .autoloop-poison-count
+fi
+# 毒会话：连续 N 轮输出含阻塞话术且零产物 → 清 SID 强制新会话（避免 resume
+# 复读污染上下文）；短语可经 LEMVO_POISON_PHRASES 覆盖（| 分隔的 grep -E 模式）
+POISON_RE="${LEMVO_POISON_PHRASES:-只读|read.only|READY_TO_PROBE.*不满足|ready_blocker}"
+if [ -z "$NEW_ARTIFACT" ] && grep -qiE "$POISON_RE" "$TD/engine-stdout.jsonl" 2>/dev/null; then
+  POISON_N=$(( $(cat .autoloop-poison-count 2>/dev/null || echo 0) + 1 )); echo "$POISON_N" > .autoloop-poison-count
+  if [ "$POISON_N" -ge "${LEMVO_POISON_N:-3}" ]; then
+    OLD_SID=$(cat "$SID_FILE" 2>/dev/null || true)
+    rm -f "$SID_FILE"
+    PS=$(mktemp); printf '{"type":"session-poisoned","turn_id":"%s","sid":"%s","turns":%d,"ts":"%s"}\n' \
+      "$TURN_ID" "${OLD_SID:-none}" "$POISON_N" "$(date -u +%FT%TZ)" > "$PS"
+    helper ledger-append < "$PS" || true; rm -f "$PS"
+    say "会话疑似污染（连续 $POISON_N 轮阻塞话术+零产物）——已清 SID，下一轮全新会话"
+  fi
+fi
+# 零产物空转兜底闸门：连续 N 轮（默认 5）无任何项目产物 → 明确决策点，不礼貌空转
+if [ -z "$NEW_ARTIFACT" ] && [ "$STALL_N" -ge "${LEMVO_STALL_ARTIFACT_N:-5}" ]; then
+  say "连续 $STALL_N 轮零产物（引擎 rc=0 但无建设输出）——空转停滞，转决策点待人查"
+  emit_reason "STALL_NO_ARTIFACT"
+  SB=$(mktemp); printf '{"type":"stall-no-artifact","turn_id":"%s","turns":%d,"ts":"%s"}\n' \
+    "$TURN_ID" "$STALL_N" "$(date -u +%FT%TZ)" > "$SB"
+  helper ledger-append < "$SB" || true; rm -f "$SB"
+  RESULT_STATUS="failed"; RESULT_NEXT="needs_user"
+  finalize_engine_json "$RESULT_STATUS"
+  write_result "$RESULT_STATUS" "$RESULT_NEXT" "$rc"
+  exit 2
+fi
+
 RESULT_STATUS="succeeded"; RESULT_NEXT="continue"
 if [ "$rc" -ne 0 ]; then
   RESULT_STATUS="failed"; RESULT_NEXT="runtime_error"
