@@ -73,3 +73,8 @@ autoresearch 最小就地契约与 Forge 解耦；公开菜单可用性过滤（
 
 lemvo-run v3：owner 原子锁（tmp 填充后 mv -T 发布，pid+starttime 双写身份，owner_alive 三态、宽限 60s 不抢锁）；C5 启动对账（turns/*+engine.json 判活、孤儿引擎等待+--recover 打捞、manifest settled 标记）；C6 结构化原因（HOLD→WAITING_USER、BLOCKED-USER→BLOCKED rc9、STOP→rc6）；引导常驻+双向切换（REQ_ADV 触摸、无 owner advance 共享步进）；作业六终态+回执 v2（run_id 预注册、JSON done_file、stale/corrupt 判定）。autoloop v4.5：整轮占用（.autoloop-turn-active=turn_id|pid|start，模型结束≠轮结束）；JSON-only 计量（cache_read/cache_creation 缺失=unknown 不凑 0、total_cost_usd 保真 1e-05、claude 累计成本按 SID 取差值、codex 单次计）；服务/引擎错误分类（429/401/5xx→rc8 保 SID，引擎结构化失败 rc0 也判 rc9）；--recover 孤儿打捞。SKILL.md：作业契约更新。回归（isolated stub，如实计数）：probe-v9 26/26、events 15/15、recovery 5 场景全过、adapter 双 CLI 夹具全过——口径=源码通过，非安装通过、非真实能力通过。活体战役（138.6/195）未触碰。下一步：小预算真实双 CLI 试点 + 交付 outputs/lemvo-runtime-v2-20261010/。
 
+
+## 2026-10-12 全局可修订研究计划（round-24，constraint-governance）
+
+research-orchestrator 内联约束治理规范（新 references/constraint-governance.md 单一来源）：计划默认可修订；约束六类×正交 authority（user_explicit/agent_proposed/needs_source…）；复审触发+change note 七字段；research_plan 区（version/stage/constraints/last_review）；旧项目缺区兼容运行（探针实证）。Gate 1 FINER 改摸底非数值否决；Forge contract v2.1 优先级限缩包内；autoresearch 停滞交回外循环；Arbor/AutoScientists 交接带 stage/plan_version/约束ID；调研技能增"配方与限制对照"。验收：CPU 契约 18/18 + probe-v9 26/26 + 服务分类 6/6 + resume-recovery 5/5 + fm_lint 0 缺陷；行为矩阵人工 rubric 21/21（软信号 14/21 如实记录）；真实 CPU 闭环三阶段（诚实"无需修订"→steer 驱动修订 v1→v2→超限 steer 发 BLOCKED-USER 不执行）。F1/F2 修复在真实失败上生效。交付 /home/yyc/gpt-output/lemvo-global-revisable-planning-implementation-2026-10-12/。迁移 dry-run 与部署清单待批准/ZCode。
+
