@@ -2,7 +2,7 @@
 
 <h1 align="center">Lemvo for Claude Code</h1>
 <p align="center"><strong>会思考、会行动的科研 Agent。<br>A research agent that thinks and acts.</strong><br>一套科研体系，两种 CLI 引擎。 / One research system. Two CLI engines.</p>
-<p align="center"><a href="https://yichen-zju.github.io/lemvo/?lang=zh">Lemvo 中文主页</a> · <a href="https://yichen-zju.github.io/lemvo/?lang=en">Lemvo in English</a> · <a href="#quickstart">Quickstart</a> · <a href="https://github.com/Yichen-ZJU/codex-for-research">Lemvo for Codex</a></p>
+<p align="center"><a href="https://yichen-zju.github.io/lemvo/?lang=zh">Lemvo 中文主页</a> · <a href="https://yichen-zju.github.io/lemvo/?lang=en">Lemvo in English</a> · <a href="#quickstart">Quickstart</a> · <a href="https://github.com/Yichen-ZJU/lemvo-for-codex">Lemvo for Codex</a></p>
 <p align="center"><img src="https://img.shields.io/badge/skills-115-B7F7D4?style=flat-square&amp;labelColor=101312" alt="115 skills"> <img src="https://img.shields.io/badge/engine-Claude%20Code-B7F7D4?style=flat-square&amp;labelColor=101312" alt="Claude Code"> <img src="https://img.shields.io/badge/workflow-research%20%E2%86%92%20experiments%20%E2%86%92%20papers-B7F7D4?style=flat-square&amp;labelColor=101312" alt="Research to experiments to papers"></p>
 
 **Lemvo** 把研究思考与实际行动接在一起：理解问题、读透文献、构建方法、选择实验，再根据结果修订下一步。**Research Orchestrator** 协调 **115 个科研技能**，通过内外双循环推进从构想到发现、再到论文的研究过程。
@@ -131,8 +131,8 @@ Both repositories contain **115 skills with the same names**. Research conventio
 先安装并登录 Claude Code，再在 Bash 环境中运行： / Install and sign in to Claude Code, then run in Bash:
 
 ```bash
-git clone https://github.com/Yichen-ZJU/claude-for-research.git
-cd claude-for-research
+git clone https://github.com/Yichen-ZJU/lemvo-for-claude.git
+cd lemvo-for-claude
 ./install.sh
 ```
 
