@@ -78,3 +78,8 @@ lemvo-run v3：owner 原子锁（tmp 填充后 mv -T 发布，pid+starttime 双�
 
 research-orchestrator 内联约束治理规范（新 references/constraint-governance.md 单一来源）：计划默认可修订；约束六类×正交 authority（user_explicit/agent_proposed/needs_source…）；复审触发+change note 七字段；research_plan 区（version/stage/constraints/last_review）；旧项目缺区兼容运行（探针实证）。Gate 1 FINER 改摸底非数值否决；Forge contract v2.1 优先级限缩包内；autoresearch 停滞交回外循环；Arbor/AutoScientists 交接带 stage/plan_version/约束ID；调研技能增"配方与限制对照"。验收：CPU 契约 18/18 + probe-v9 26/26 + 服务分类 6/6 + resume-recovery 5/5 + fm_lint 0 缺陷；行为矩阵人工 rubric 21/21（软信号 14/21 如实记录）；真实 CPU 闭环三阶段（诚实"无需修订"→steer 驱动修订 v1→v2→超限 steer 发 BLOCKED-USER 不执行）。F1/F2 修复在真实失败上生效。交付 /home/yyc/gpt-output/lemvo-global-revisable-planning-implementation-2026-10-12/。迁移 dry-run 与部署清单待批准/ZCode。
 
+
+## 2026-10-12 round-24 评审收尾（F1-F5 定点补缺）
+
+F1 方向/确认标签拆分（CI 含零≠EXPLORATORY_NEGATIVE，正点估计记 EXPLORATORY_POSITIVE 未确认；constraint-governance + 主控标签表 + measurement-fairness 三处对齐，c07/c08 重判 2/2）；F2 金额预算派发前拦截（unit=usd 且 used≥cap → rc2 零调用决策点；结算按 cost_basis 累计 budget.used，负 delta=基线重置计 reported；探针 15/15）；F3 Arbor 阶段分层（授权交接免例行人审、unattended 映射 auto、IDEATE 新颖性滤网限最终方法主张）；F4 摘要按 research_plan 层级读取+改版刷新（15/18 探针覆盖同名键反例）+冷启动治理指针；F5 五维尾门阶段化。验收：最终字节 15+18+26+6+5 全过；自主 CPU 战役（无 steer 无预写分支）证明实验发现驱动的自主修订成立（方差缩减 26× envelope 内达标）但 version/change-note 记账缺失（裸调用未加载治理文本）——指针已入模板，复验待部署。F2 真实生效实证：budget.used=1.47 逐轮入账。活体战役零触碰。
+
