@@ -115,3 +115,7 @@ Batch 2 后端（Pro）：D1 指标合同规范化（champion 等首个基线显
 Batch 2 过度约束修正（A1-A9）：crash/metric-error/timeout 三分（contract v2.2），Guard 失败/超时/解析失败均非科学否证；min_delta=确认跑触发器非 keep 门槛（同向小正信号保留并记确认状态）；比较口径按研究问题四选一（等墙钟/等 updates/等数据量/收敛）；可编辑范围按任务定义、依赖清单走预授权；评审裁决路由化（revision 与 build 可并行、无修订路径才 Reject、落后≠支配、severity 属于单个 flaw）；红旗降级为定位信号（无 top-3 论文/12 个月 SOTA 窗/外部受益人先验，资源区间=估算缺省）；家族统计仅真 DISCARD 降权（FAILED=fix-and-retry）；UNCONFIRMED（未确认保留候选）≠ DISCARD。
 Batch 3：四仓 README 补常驻控制器入口（start --mode / switch / advance / steer / status）；净 HOME 安装验收三仓 rc=0 且安装产物与提交 diff -r 零差异、README 路由净安装根全通；分发脚本硬编码解释器清除（PY=${ARBOR_PY:-python3}）；危险整根删除回滚示例移除（改 git checkout <tag> && ./install.sh）。
 回归：probe-r29fix 37/37 × 4 仓新鲜重跑 + B2 边界探针 28/28（PKG2/D2/D3 行为级 + D1/D4/A 系静态）+ probe-v9 26/26、mode-15 15/15（verified-then，运行时文件此后字节未变）+ 四仓 run_tests.sh 全过 + arbor pytest 384 过（7 失败为预存缺 demo 资产，基线 HEAD 同缺已核实）。24 条验收断言分级映射：直接演示 12 / 场景保留 9 / 机制核验 3（如实分级）。交付 /home/yyc/outputs/lemvo-r29-fix-20261013/。公开仓无新增受限字样（全树命中均为既有历史条目）。live 未部署（由 ZCode 执行）；真实双 CLI 小预算闭环随后补记。
+
+## 2026-10-13 r29-fix 补记：真实双 CLI 小预算闭环
+
+单轮冒烟（/tmp/r29-loop；证据 results/dual-cli-loop/）。claude 线真实闭环通过：start → 真实引擎轮 → 计量结算 → max-turns COMPLETED；账本实收 tokens 59457/15523、cache_read 642368、cost_usd_delta=2.0131（first-reported，client-estimate）、wall 404s、SID 冷启动取得；模型写 campaign_log.txt 未写 STATE.md，artifact_ref=none 如实入账（prep 计数如实记 0）。codex 线诚实记录阻断：本机 chatgpt.com 不可达（engine-stderr 连续请求超时），引擎分类 CONFIG_INVALID rc64（预检同时报告本机 codex config 键落在 TOML 节内的既有警告），退避重试 3 次后控制器转 BLOCKED|engine-fails（needs_user），SID 未弃、无假账。live 未部署不变（由 ZCode 通道执行）。
