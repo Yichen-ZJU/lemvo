@@ -585,11 +585,12 @@ fi
 [ "$CMD" = "start" ] || usage
 shift 2   # start/resume 语义相同（--resume 兼容旧调用，在剩余参数中忽略）
 
-MAX_TURNS="$MAX_TURNS_DEFAULT"; ENGINE=""
+MAX_TURNS="$MAX_TURNS_DEFAULT"; ENGINE=""; MODE_ARG=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --engine) ENGINE="${2:-}"; shift 2;;
     --max-turns) MAX_TURNS="${2:-}"; shift 2;;
+    --mode) MODE_ARG="${2:-}"; shift 2;;   # r28: guided|unattended 启动模式（不指定=保留已有）
     --resume) shift;;
     *) shift;;
   esac
@@ -598,12 +599,25 @@ export LEMVO_RC_MODE=structured
 [ -n "$ENGINE" ] && echo "$ENGINE" > "$ENGINE_F"
 export ENGINE="$(engine_now)"
 
+# ── r28：模式单一来源接线——显式 --mode 优先；否则保留 .lemvo-mode 已有合法值；不覆盖 ──
+CUR_MODE="$(cat "$MODE_F" 2>/dev/null || echo "")"
+if [ -n "$MODE_ARG" ]; then
+  case "$MODE_ARG" in
+    guided|unattended) echo "$MODE_ARG" > "$MODE_F"; log "启动模式（--mode 指定）: $MODE_ARG";;
+    *) log "忽略无效 --mode '$MODE_ARG'（须 guided|unattended），保留 '$CUR_MODE'";;
+  esac
+elif [ "$CUR_MODE" = "guided" ] || [ "$CUR_MODE" = "unattended" ]; then
+  log "启动模式（保留已有）: $CUR_MODE"
+else
+  echo unattended > "$MODE_F"
+  log "启动模式（默认）: unattended（无既有合法值）"
+fi
+
 # ── C1：原子拿锁；退出核对身份清理 ──
 owner_take || { echo "已有活跃控制器（pid=$(owner_pid)）或锁初始化中——本进程不另开循环"; exit 0; }
 trap owner_release EXIT
 mkdir -p "$QUEUE" "$ARCHIVE" "$RECEIPTS" "$TURNSD"
-echo unattended > "$MODE_F"
-log "=== 控制器启动：engine=$ENGINE max-turns=$MAX_TURNS pid=$$ host=$(hostname 2>/dev/null || echo unknown) ==="
+log "=== 控制器启动：engine=$ENGINE max-turns=$MAX_TURNS mode=$(mode_now) pid=$$ host=$(hostname 2>/dev/null || echo unknown) ==="
 
 # ── C5：启动先对账——未结算轮恢复优先，活作业等待，不重跑实验 ──
 recover_turns

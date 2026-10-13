@@ -20,8 +20,16 @@ def main():
     fixtures = data.get("source_fixtures", {})
     fails = []
 
-    if len(cases) != 12:
-        fails.append("expected 12 cases, got %d" % len(cases))
+    if len(cases) < 12:
+        fails.append("expected >=12 cases, got %d" % len(cases))
+    # mode coverage: must include both guided and unattended
+    modes = {c.get("mode") for c in cases}
+    if not {"guided", "unattended"}.issubset(modes):
+        fails.append("mode coverage must include both guided and unattended; got %s" % modes)
+    # every case has authorization
+    for c in cases:
+        if not c.get("authorization"):
+            fails.append("%s: missing authorization" % c.get("case_id", "?"))
 
     ids = set()
     for c in cases:
@@ -41,10 +49,10 @@ def main():
         for leak_kw in ["应该", "must do X", "expected", "correct answer", "rubric"]:
             if leak_kw in scen:
                 fails.append("%s: scenario leaks expected answer (%s)" % (cid, leak_kw))
-        # scenario should reference a fixture if it claims source material
-        if "来源" in scen or "source" in scen.lower():
-            if not any(c.get("source_refs") for _ in [0]):
-                pass  # source_refs optional per case
+        # source_refs, when present, must reference a declared fixture
+        for sr in c.get("source_refs", []):
+            if sr not in fixtures:
+                fails.append("%s: source_refs references undeclared fixture %s" % (cid, sr))
 
     # fixture paths resolve (relative to tests/)
     for fid, path in fixtures.items():

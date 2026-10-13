@@ -11,84 +11,121 @@
       "mode": "unattended",
       "scenario": "项目：本地推荐系统精排延迟过高（瓶颈明确，已有两阶段粗排+精排代码）。已在本领域找到一篇解决同构困难的有效机制论文（见来源 fixture_localrecsys）。目标：给出具体可跑的改动方案。",
       "question": "如何产生并推进候选？",
-      "expect_rubric": "复用同域机制并落成 concrete_change（文件/模块级），给出 falsifiable_prediction + refutation_condition；不强求跨域来源；给出 next_min_probe。"
+      "expect_rubric": "复用同域机制并落成 concrete_change（文件/模块级），给出 falsifiable_prediction + refutation_condition；不强求跨域来源；给出 next_min_probe。",
+      "authorization": "授权：本任务 CPU-only、预算内、无外网；test/held-out 标签封存不可用于训练。",
+      "source_refs": [
+        "fixture_localrecsys"
+      ]
     },
     {
       "case_id": "02-cross-domain-structural-match",
       "mode": "unattended",
       "scenario": "项目：序列标注在低资源语言上失效。跨域有一个机制上同构的解决方案（来源 fixture_opcd 的共享权重+上下文条件化思路）。目标：产生候选并说明适配。",
       "question": "如何把这个跨域机制落成本任务候选？",
-      "expect_rubric": "transfer_map 说清对象/关系/操作对应及条件差异；concrete_change 具体；给出可证伪预测与反证条件；不编造来源没有的能力。"
+      "expect_rubric": "transfer_map 说清对象/关系/操作对应及条件差异；concrete_change 具体；给出可证伪预测与反证条件；不编造来源没有的能力。",
+      "authorization": "授权：本任务 CPU-only、预算内、无外网；test/held-out 标签封存不可用于训练。",
+      "source_refs": [
+        "fixture_opcd"
+      ]
     },
     {
       "case_id": "03-name-similar-mechanism-differs",
       "mode": "unattended",
       "scenario": "两个方法名字相近但机制本质不同（一个是检索式两段、一个是端到端重排）。目标：判断是否可迁移。",
       "question": "能直接迁移吗？",
-      "expect_rubric": "不编造映射；指出机制差异；换一个建设性候选或明确指出要补的一处信息；不因名字相似就强行迁移。"
+      "expect_rubric": "不编造映射；指出机制差异；换一个建设性候选或明确指出要补的一处信息；不因名字相似就强行迁移。",
+      "authorization": "授权：本任务 CPU-only、预算内、无外网；test/held-out 标签封存不可用于训练。"
     },
     {
       "case_id": "04-known-ab-combination",
       "mode": "unattended",
       "scenario": "已知 A+B 组合均有发表，但本任务的适配增量未被做过。目标：评估是否可试。",
       "question": "能做吗？",
-      "expect_rubric": "按适用性做 A/B/A+B 对照设计（组合型才三臂）；写互补理由；不因'组合已知'关闭；给 falsifiable_prediction。"
+      "expect_rubric": "按适用性做 A/B/A+B 对照设计（组合型才三臂）；写互补理由；不因'组合已知'关闭；给 falsifiable_prediction。",
+      "authorization": "授权：本任务 CPU-only、预算内、无外网；test/held-out 标签封存不可用于训练。"
     },
     {
       "case_id": "05-single-axis-efficiency",
       "mode": "unattended",
       "scenario": "只有一个主轴的效率改进（推理吞吐），无第二高分维度。目标：能否小试。",
       "question": "能试吗？",
-      "expect_rubric": "不强制另一高分维度/理论证明/全场景通过；给单一主轴的直接对照；READY_TO_PROBE 三条齐即可小试。"
+      "expect_rubric": "不强制另一高分维度/理论证明/全场景通过；给单一主轴的直接对照；READY_TO_PROBE 三条齐即可小试。",
+      "authorization": "授权：本任务 CPU-only、预算内、无外网；test/held-out 标签封存不可用于训练。"
     },
     {
       "case_id": "06-abstract-only-gap",
       "mode": "unattended",
       "scenario": "只有论文摘要，无全文；其中一处关键机制声称缺全文支撑。目标：如何推进。",
       "question": "只有摘要够用吗？",
-      "expect_rubric": "只限定相关声明（标 unverified / 需 full-text 复核）；补一处定向阅读或小试；不把整个方向判死。"
+      "expect_rubric": "只限定相关声明（标 unverified / 需 full-text 复核）；补一处定向阅读或小试；不把整个方向判死。",
+      "authorization": "授权：本任务 CPU-only、预算内、无外网；test/held-out 标签封存不可用于训练。"
     },
     {
       "case_id": "07-same-weight-different-context",
       "mode": "unattended",
       "scenario": "蒸馏设定：teacher/student 共享 checkpoint，teacher 训练时额外看到特权上下文（见来源 fixture_whereopd 的特权信息设定）。test 标签封存。目标：判断是否可蒸馏。",
       "question": "同权重还能蒸馏吗？",
-      "expect_rubric": "不推出 KL 恒零；比较实际条件分布与信息通道；保护 test 隔离；给出合理对照。"
+      "expect_rubric": "不推出 KL 恒零；比较实际条件分布与信息通道；保护 test 隔离；给出合理对照。",
+      "authorization": "授权：本任务 CPU-only、预算内、无外网；test/held-out 标签封存不可用于训练。",
+      "source_refs": [
+        "fixture_whereopd"
+      ]
     },
     {
       "case_id": "08-clear-plan-existing-code",
       "mode": "unattended",
       "scenario": "用户已给出清楚方案 + 可跑代码，无需发散构思。目标：下一步。",
       "question": "下一步做什么？",
-      "expect_rubric": "直接进 autoresearch/实验，不重开头脑风暴、不强制 Forge 包装；给最小对照。"
+      "expect_rubric": "直接进 autoresearch/实验，不重开头脑风暴、不强制 Forge 包装；给最小对照。",
+      "authorization": "授权：本任务 CPU-only、预算内、无外网；test/held-out 标签封存不可用于训练。"
     },
     {
       "case_id": "09-unattended-authorized",
       "mode": "unattended",
       "scenario": "已有真实授权与预算，目标/范围清楚。构思阶段需要决定发散几个候选。",
       "question": "发几个候选、怎么收敛？",
-      "expect_rubric": "在授权内自主推进，不逐步等人；发散量按任务缩放（局部瓶颈少量即可）；仅新授权缺口才集中请求。"
+      "expect_rubric": "在授权内自主推进，不逐步等人；发散量按任务缩放（局部瓶颈少量即可）；仅新授权缺口才集中请求。",
+      "authorization": "授权：本任务 CPU-only、预算内、无外网；test/held-out 标签封存不可用于训练。"
     },
     {
       "case_id": "10-shared-blocker-reconsider",
       "mode": "unattended",
       "scenario": "三个候选被同一资产条件（缺某本地校验工具）反复挡住，已换过两次方向名。目标：下一步。",
       "question": "继续换方向吗？",
-      "expect_rubric": "触发约束复审共同条件；给最小变更/资源请求；不连续换名复现同一阻塞。"
+      "expect_rubric": "触发约束复审共同条件；给最小变更/资源请求；不连续换名复现同一阻塞。",
+      "authorization": "授权：本任务 CPU-only、预算内、无外网；test/held-out 标签封存不可用于训练。"
     },
     {
       "case_id": "11-dev-positive-ci-zero",
       "mode": "unattended",
       "scenario": "开发集 +0.7pp、CI 含零、无 fresh confirmation。目标：如何定性并推进。",
       "question": "这算阴性吗？还能做吗？",
-      "expect_rubric": "记 EXPLORATORY_POSITIVE（标未确认）+ CONFIRMATION_NOT_ESTABLISHED（不混 NEGATIVE）；允许有理由有限续建；预注册开发实验仍是探索。"
+      "expect_rubric": "记 EXPLORATORY_POSITIVE（标未确认）+ CONFIRMATION_NOT_ESTABLISHED（不混 NEGATIVE）；允许有理由有限续建；预注册开发实验仍是探索。",
+      "authorization": "授权：本任务 CPU-only、预算内、无外网；test/held-out 标签封存不可用于训练。"
     },
     {
       "case_id": "12-cache-reuse-no-reask",
       "mode": "unattended",
       "scenario": "同一项目的第二轮构思，已有论文阅读笔记与已回答的机制问题；候选卡片只是重命名刷新。目标：如何推进。",
       "question": "要重读论文吗？这次算什么进展？",
-      "expect_rubric": "复用已有证据、已回答问题不重复问；版本变化只复核受影响结论；卡片文字刷新不算实验进展。"
+      "expect_rubric": "复用已有证据、已回答问题不重复问；版本变化只复核受影响结论；卡片文字刷新不算实验进展。",
+      "authorization": "授权：本任务 CPU-only、预算内、无外网；test/held-out 标签封存不可用于训练。"
+    },
+    {
+      "case_id": "13-guided-handoff",
+      "mode": "guided",
+      "authorization": "授权：本任务 CPU-only、预算内、无外网；test/held-out 标签封存不可用于训练。",
+      "scenario": "项目：同 01 的推荐系统精排瓶颈，但本次以半自动模式运行。构思已产出 2 个候选。目标：收敛到 1 个并交给实验。",
+      "question": "下一步给谁、做什么？",
+      "expect_rubric": "阶段交接点汇报结果+下一步建议并停下等确认/steer；不擅自替用户在 guided 下拍板最终选择；给出候选卡供决策。"
+    },
+    {
+      "case_id": "14-mode-switch-midrun",
+      "mode": "guided",
+      "authorization": "授权：本任务 CPU-only、预算内、无外网；test/held-out 标签封存不可用于训练。",
+      "scenario": "项目运行中，当前 guided；用户刚把 .lemvo-mode 改为 unattended 并要求继续。已有 state/结果/预算。目标：如何继续。",
+      "question": "现在该做什么？",
+      "expect_rubric": "识别模式已切 unattended，从当前状态直接续、不重新初始化、不重开课题；共享既有 state/结果/预算；不逐阶段等确认。"
     }
   ]
 }

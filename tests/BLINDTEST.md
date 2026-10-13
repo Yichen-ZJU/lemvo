@@ -17,9 +17,10 @@
 1. 夹具自检（无模型）：
    `python3 tests/ideation_blindtest_fixture_test.py`
 2. 构造隔离技能根（复制 `skills/` 到临时目录），逐案新开单轮会话。
-3. 每案 prompt = 案例 `scenario` + `question` +（若引用来源）对应 fixture 文件内容；
-   **不注入** `expect_rubric`、不注入 grounded-ideation.md 全文（测真实加载链，
-   不向测试代理预注入治理规范来替代加载链）。
+3. 每案 prompt = 案例 `scenario` + `question` + `authorization` +（若引用来源）对应
+   fixture 文件内容；**把案例 `mode` 写入测试项目的 `.lemvo-mode`**（单一来源，
+   子技能读取同一模式）；**不注入** `expect_rubric`、不注入 grounded-ideation.md
+   全文（测真实加载链，不向测试代理预注入治理规范来替代加载链）。
 4. 按 `expect_rubric` 逐项人工判定，记录：原始输出、实际调用、判定、失败原因。
 5. 汇总到 `blindtest-results.json`（cases / pass / fail / 未跑），失败案例附原输出。
 
