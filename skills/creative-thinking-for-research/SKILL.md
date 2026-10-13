@@ -124,7 +124,9 @@ Dedre Gentner's **structure-mapping theory** and Kevin Dunbar's studies of real 
    - Good: "We have a system that must selectively aggregate information from a large set, where relevance is context-dependent and the cost scales quadratically with set size"
 2. **Search for structural matches**: What other systems selectively aggregate from large sets?
    - Database query optimization, visual attention in neuroscience, information retrieval, resource allocation
-3. **Pick the most distant match** with genuine structural fidelity
+3. **Pick the best-fitting match** (structural fidelity + available assets
+   + implementation cost), not necessarily the most distant — domain
+   distance is a diversity factor, not a selection criterion.
 4. **Map the solution mechanism**: How does the source domain solve this?
 5. **Transfer and adapt**: What changes when you bring that mechanism into your domain?
 6. **Generate predictions**: The analogy should tell you something you didn't already know
@@ -361,6 +363,6 @@ When a researcher asks for help with creative thinking or novel ideation:
 
 **Key Principles**:
 - Generative mode first, evaluative mode second — do not filter prematurely
-- Distant analogies are more valuable than nearby ones, but require more validation
+- Fit to the current bottleneck outranks domain distance — a nearby mechanism that genuinely solves the problem beats a distant analogy that needs heavy adaptation
 - The researcher's domain expertise is essential — the agent provides the cognitive scaffolding, not the domain knowledge
 - Encourage the researcher to sit with contradictions rather than resolve them quickly

@@ -25,9 +25,12 @@ capability and available hours per week, probes whether the idea has
 paradigm-shift potential, flags fatal flaws, and returns one of three
 verdicts: Strong Accept, Accept with Revisions, or Reject and Pivot.
 
-The goal is to kill weak ideas before the student invests months, and to
-shape promising-but-underdeveloped ideas into stronger forms before
-writing begins.
+The goal is to **route ideas to the right next step** — rank candidate
+ideas, surface fixable weaknesses before heavy investment, and
+**preserve a constructive path for exploration-stage work** — not to
+veto an idea merely because it is early. Whether to execute a bounded
+pilot is governed by the orchestrator's exploration gate (READY_TO_PROBE +
+authorization), never by scores or verdict counts alone.
 
 ## When to use this skill
 
@@ -49,7 +52,9 @@ writing begins.
   给出机制解释，均为合法 delta 类型）+ **机制故事**（为什么增量
   成立）+ **失败模式预期**（增量在什么情况下会失效）。
 - delta 清晰 → 照常推进（走完整 Gate，**不降档**）；delta 模糊 →
-  才建议 PIVOT。新颖性扣分只针对"说不清相对谁增量"，不针对
+  **先建议把增量限定为 provisional（标"待核"）并提一个有限对照**，小试去补
+  清晰度；只有补充后仍无值得测试的增量才建议换候选/经济性停止，不自动 PIVOT
+  整个方法家族。新颖性扣分只针对"说不清相对谁增量"，不针对
   "有很近的近邻"。
 
 一句话决策规则：**有近邻 → 写 delta 声明并继续；要证明的现象还不存在 → 才需要空白证明。**
@@ -177,8 +182,11 @@ section below.
 
 Issue one of three verdicts:
 
-- **Strong Accept**: execute now. Two or more dimensions at 8+, no
-  fatal flaws, capability match green, lifecycle fit.
+- **Strong Accept**: ready to pursue now. For a paper-maturity read:
+  two or more dimensions at 8+, no fatal flaws, capability match green,
+  lifecycle fit. For an exploration read: a clear dominant axis and no
+  CRITICAL flaw suffice — the verdict is a priority signal, not an
+  execution gate.
 - **Accept with Revisions**: pivot the scope per recommendations
   before starting. Some dimensions weak, fixable flaws, or lifecycle
   mismatch that can be shortened.
@@ -207,9 +215,11 @@ Before returning the verdict:
    or are labelled "unverified; literature check required".
 4. **[inspection]** Fatal flaws are specific and actionable; "this
    might not work" is not a flaw statement.
-5. **[inspection]** Verdict is consistent with scoring: Strong
-   Accept requires at least two dimensions at 8+ and zero CRITICAL
-   flaws.
+5. **[inspection]** Verdict is consistent with scoring. For a
+   paper-maturity read: Strong Accept requires at least two dimensions at
+   8+ and zero CRITICAL flaws. For an exploration read: no score-based
+   threshold grants or blocks execution — eligibility comes from the
+   orchestrator's exploration gate, not from scores.
 6. **[inspection]** Paradigm-shift claim cites which probing
    question was answered positively.
 7. **[attestation]** Lifecycle prediction is reasoned from the
@@ -282,6 +292,13 @@ Disruptive potential: <none, possible, strong>.
 
 ### 8. Verdict
 **<Strong Accept or Accept with Revisions or Reject and Pivot>**
+
+For an **exploration-stage** evaluation, keep the verdict but lead with a
+constructive reading: a priority ranking, the fixable points, and the
+**next minimal constructive experiment** — scores order candidates and
+shape revisions; they never strip exploration execution eligibility on
+their own (per the orchestrator's exploration gate). For a
+**paper-maturity** evaluation, apply the full reviewer standard.
 
 Verdict scope (REQUIRED): the exact claim/formulation this verdict covers.
 A Reject applies to the current formulation only — never to the whole

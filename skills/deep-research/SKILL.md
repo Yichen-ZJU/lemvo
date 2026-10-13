@@ -85,11 +85,21 @@ Create `outputs/.plans/<slug>.md` immediately. The plan must include:
 
 Make the scale decision before assigning owners in the plan. If the topic is a narrow "what is X" explainer, the plan must use lead-owned direct search tasks only; do not allocate researcher subagents in the task ledger.
 
-After writing the plan, stop and ask for explicit confirmation before gathering evidence. Summarize the plan briefly and ask:
+After writing the plan, check for existing authorization before asking
+again. If the run already carries an approved scope (e.g. an orchestrator
+downstream-handoff with stage/plan_version, or a user instruction that
+names this very investigation), treat it as authorized and continue —
+authorization is down-streamed, not re-requested per phase. Only when
+authorization is genuinely absent do you stop and ask for explicit
+confirmation before gathering evidence; summarize the plan briefly and
+ask:
 
 `Proceed with this deep research plan? Reply "yes" to continue, or tell me what to change.`
 
-Do not run searches, fetch sources, spawn subagents, draft, cite, review, or deliver final artifacts until the user confirms. If the user requests changes, update `outputs/.plans/<slug>.md` first, then ask for confirmation again.
+Do not run searches, fetch sources, spawn subagents, draft, cite, review,
+or deliver final artifacts until you have authorization (given in advance
+or confirmed now). If the user requests changes, update
+`outputs/.plans/<slug>.md` first, then ask for confirmation again.
 
 ## Step 2: Scale
 

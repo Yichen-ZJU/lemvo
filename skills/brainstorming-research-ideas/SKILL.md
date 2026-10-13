@@ -119,7 +119,11 @@ Borrowing structural ideas from other disciplines is one of the most generative 
 
 **Requirements for a Valid Analogy**:
 - **Structural fidelity**: The mapping must hold at the level of underlying mechanisms, not just surface similarity
-- **Non-obvious connection**: If the link is well-known, the novelty is gone
+- **Non-obvious connection**: A well-known link is a lower-novelty signal
+  for the *paper claim*, not a ban on the *work* — known connections can
+  still be developed, combined, adapted to new conditions, or validated
+  where they were not. Judge by fit to the current bottleneck, not by
+  whether someone has linked the fields before.
 - **Testable predictions**: The analogy should generate concrete hypotheses
 
 **High-Yield Source Fields for ML Research**:
