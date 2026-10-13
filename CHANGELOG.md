@@ -47,15 +47,15 @@ idea-evaluator 与 research-orchestrator 各增一节"近邻存在 ≠ 否决 / 
 
 ## 2026-10-09 装载器修复 + 实验路由自动选择
 
-codex 0.160.0 字段报告驱动：experiment-forge 补 description（0.160.0 必填、argument-hint 可选）；全舰队 589 个 SKILL.md 按最严 schema lint 清零（含 anti-defensive-writing-en 的 frontmatter 内嵌段修复）；orchestrator 增加可验证的实验引擎分流判据（有包/有会话→autoresearch；新课题无包→先 forge；pro 单目标→Arbor、开放方向→AutoScientists），交接显式传预算与停止条件。138.6/140.30 热修文本与上游统一。
+codex 0.160.0 字段报告驱动：experiment-forge 补 description（0.160.0 必填、argument-hint 可选）；全舰队 589 个 SKILL.md 按最严 schema lint 清零（含 anti-defensive-writing-en 的 frontmatter 内嵌段修复）；orchestrator 增加可验证的实验引擎分流判据（有包/有会话→autoresearch；新课题无包→先 forge；单目标→Arbor、开放方向→多方案竞争引擎），交接显式传预算与停止条件。138.6/140.30 热修文本与上游统一。
 
 ## 2026-10-09 路由哲学修正 + SOTA 复现改进路线
 
-路线改菜单制（判据可验证、裁决在 orchestrator、用户指定优先）；撤销"新课题必须先 forge"的刚性条款（裸库 autoresearch 合法）；AutoScientists 双用途（撒网 + 单项目多方案竞争，与 Arbor 不互斥）；新增 SOTA 复现改进路线（限时复现 ±5% 量级对上→官方 checkpoint 降级→SOTA 代码库上直接迭代，基线预注册冻结）。
+路线改菜单制（判据可验证、裁决在 orchestrator、用户指定优先）；撤销"新课题必须先 forge"的刚性条款（裸库 autoresearch 合法）；多方案竞争引擎双用途（撒网 + 单项目多方案竞争，与 Arbor 不互斥）；新增 SOTA 复现改进路线（限时复现 ±5% 量级对上→官方 checkpoint 降级→SOTA 代码库上直接迭代，基线预注册冻结）。
 
 ## 2026-10-09 路由执行链接线（六项）
 
-autoresearch 最小就地契约与 Forge 解耦；公开菜单可用性过滤（目录存在性先于偏好）；codex-pro AutoScientists 交接规格（TASK.md 四字段+LAUNCH.md 底稿+launcher 路径）；research-state.yaml 累计预算总账与 backend_ledger；KEEP 口径拆分为 eval_baseline/best_value 两字段（主控+契约+模板三处统一）；文献路由改 ArXiv MCP 全文链。arbor 文档示例改绝对解释器（140.16 glibc 墙）并实测调用链。
+autoresearch 最小就地契约与 Forge 解耦；公开菜单可用性过滤（目录存在性先于偏好）；团队引擎交接规格（TASK.md 四字段+LAUNCH.md 底稿+launcher 路径）；research-state.yaml 累计预算总账与 backend_ledger；KEEP 口径拆分为 eval_baseline/best_value 两字段（主控+契约+模板三处统一）；文献路由改 ArXiv MCP 全文链。arbor 文档示例改绝对解释器（140.16 glibc 墙）并实测调用链。
 
 ## 2026-10-09 准备循环失控修复
 
@@ -76,7 +76,7 @@ lemvo-run v3：owner 原子锁（tmp 填充后 mv -T 发布，pid+starttime 双�
 
 ## 2026-10-12 全局可修订研究计划（round-24，constraint-governance）
 
-research-orchestrator 内联约束治理规范（新 references/constraint-governance.md 单一来源）：计划默认可修订；约束六类×正交 authority（user_explicit/agent_proposed/needs_source…）；复审触发+change note 七字段；research_plan 区（version/stage/constraints/last_review）；旧项目缺区兼容运行（探针实证）。Gate 1 FINER 改摸底非数值否决；Forge contract v2.1 优先级限缩包内；autoresearch 停滞交回外循环；Arbor/AutoScientists 交接带 stage/plan_version/约束ID；调研技能增"配方与限制对照"。验收：CPU 契约 18/18 + probe-v9 26/26 + 服务分类 6/6 + resume-recovery 5/5 + fm_lint 0 缺陷；行为矩阵人工 rubric 21/21（软信号 14/21 如实记录）；真实 CPU 闭环三阶段（诚实"无需修订"→steer 驱动修订 v1→v2→超限 steer 发 BLOCKED-USER 不执行）。F1/F2 修复在真实失败上生效。交付 /home/yyc/gpt-output/lemvo-global-revisable-planning-implementation-2026-10-12/。迁移 dry-run 与部署清单待批准/ZCode。
+research-orchestrator 内联约束治理规范（新 references/constraint-governance.md 单一来源）：计划默认可修订；约束六类×正交 authority（user_explicit/agent_proposed/needs_source…）；复审触发+change note 七字段；research_plan 区（version/stage/constraints/last_review）；旧项目缺区兼容运行（探针实证）。Gate 1 FINER 改摸底非数值否决；Forge contract v2.1 优先级限缩包内；autoresearch 停滞交回外循环；Arbor/团队引擎交接带 stage/plan_version/约束ID；调研技能增"配方与限制对照"。验收：CPU 契约 18/18 + probe-v9 26/26 + 服务分类 6/6 + resume-recovery 5/5 + fm_lint 0 缺陷；行为矩阵人工 rubric 21/21（软信号 14/21 如实记录）；真实 CPU 闭环三阶段（诚实"无需修订"→steer 驱动修订 v1→v2→超限 steer 发 BLOCKED-USER 不执行）。F1/F2 修复在真实失败上生效。交付 /home/yyc/gpt-output/lemvo-global-revisable-planning-implementation-2026-10-12/。迁移 dry-run 与部署清单待批准/ZCode。
 
 
 ## 2026-10-12 round-24 评审收尾（F1-F5 定点补缺）
@@ -86,7 +86,7 @@ F1 方向/确认标签拆分（CI 含零≠EXPLORATORY_NEGATIVE，正点估计�
 
 ## 2026-10-12 探索语义残留冲突定点修复（r26，grounded-ideation 文档发现项）
 
-GPT grounded-ideation 计划指出的七处与 round-24 探索/确认分层、近邻不否决规范相冲突的残留，已在四仓定点修复并推送（claude 386dbf5 / codex 402dae6 / claude-pro b8f2017 / codex-pro 875d5c9）：① 预注册≠confirmatory（开发实验仍探索，确认需确认设计）；② 近邻 delta 模糊→先 provisional+有限对照小试，不自动 PIVOT（主控+evaluator 两处）；③ 探索门接受 provisional delta 声明（要素可标待核）；④ idea-evaluator 从"杀弱想法"改为"路由到下一步"，探索读法给优先级+可修复点+下一最小实验，两维 8+ 阈值仅限论文成熟评价；⑤ brainstorm 已知联系≠新颖性消失（可开发/组合/新条件验证）；⑥ creative 最佳契合（保真+资产+成本）替代"越远越好"；⑦ deep-research 授权下传不重复 yes 门（先查已有授权）。fm_lint 0 缺陷，公开仓无新增 AutoScientists 字样。grounded-ideation 共享参考件本体与盲测/真实闭环仍待批准，另行处理。
+GPT grounded-ideation 计划指出的七处与 round-24 探索/确认分层、近邻不否决规范相冲突的残留，已在四仓定点修复并推送（claude 386dbf5 / codex 402dae6 / claude-pro b8f2017 / codex-pro 875d5c9）：① 预注册≠confirmatory（开发实验仍探索，确认需确认设计）；② 近邻 delta 模糊→先 provisional+有限对照小试，不自动 PIVOT（主控+evaluator 两处）；③ 探索门接受 provisional delta 声明（要素可标待核）；④ idea-evaluator 从"杀弱想法"改为"路由到下一步"，探索读法给优先级+可修复点+下一最小实验，两维 8+ 阈值仅限论文成熟评价；⑤ brainstorm 已知联系≠新颖性消失（可开发/组合/新条件验证）；⑥ creative 最佳契合（保真+资产+成本）替代"越远越好"；⑦ deep-research 授权下传不重复 yes 门（先查已有授权）。fm_lint 0 缺陷，公开仓无新增外部引擎字样。grounded-ideation 共享参考件本体与盲测/真实闭环仍待批准，另行处理。
 
 
 ## 2026-10-12 grounded-ideation 共享接口（IdeaScientist 借鉴，无新 skill）
@@ -107,3 +107,11 @@ GPT grounded-ideation 计划指出的七处与 round-24 探索/确认分层、�
 
 评审 P1：重复 start 曾被锁拒绝却仍先改 .lemvo-mode/引擎，把活 guided 控制器偷偷切 unattended。修：参数解析后**成功拿 owner 锁才应用模式与引擎配置**，被拒 start 不再改动活控制器；switch 不变。评审 P2：裸 --mode/--max-turns/--engine 缺值原卡解析死循环，现统一 need_value 校验缺值即 rc64 用法错误。盲测案例 14 原 mode=guided 却 expect unattended 自相矛盾，统一为 unattended（切换已完成）。回归 probe-mode-start 扩至 15 检查（活 owner 拒绝重启不改模式/引擎/不新增派发 + switch 恢复推进 + 缺值 rc64），probe-v9 26/26，fm_lint 115/115/178/181 零缺陷。四仓推送（c2a51bd/28c7f8d/d71754b/dc13546）。盲测 RUN + 双 CLI 闭环待批预算；live 未部署。
 
+
+## 2026-10-13 r29-fix：发布前独立评审 P1 全量闭环（运行时 R1-R5 + 后端 D/PKG + 过度约束 A1-A9 + 入口/安装 B3）
+
+Batch 1 运行时：R1 计量分账（USD 唯一硬门、GPU-hours 纯统计不设门、累计口径跨重启重放账本、负 delta 按 reported 基线重置、unknown 不补 0 不同时计费）；R2 结果 JSON 严格解析（失败退出也写回执进分析、日志先行内容不提前唤醒、analyst 至多唤醒一次、负向科研结果≠运行故障）；R3 多阻塞合并为结构化 BLOCKED（rc6，原因不互相覆盖）；R4 孤儿轮恢复（未结算轮 token/费用快照复用、不双计）；R5 set_status 结构化控制事件。
+Batch 2 后端（Pro）：D1 指标合同规范化（champion 等首个基线显式建立、legacy 方向枚举在读边界归一 maximize|minimize、结果阶梯显式 BASELINE 档）；D2 剪枝=搜索调度态（未测后代保持 pending、已完成结果保留、视图声明"非失败方向"）；D3 merge 无测试分需显式 --accept-dev（merge_basis 落盘、test 隔离明示、改进门仅 test 基准生效）；D4 种子聚合=均值、best_seed_value 仅展示；PKG1 Arbor 安装正典源（仓库根技能套件优先解析、内嵌副本漂移告警并从正典安装、再安装 11 目录不回退）；PKG2 评分格式闸（bool/NaN/Infinity/溢出拒收，坏 eval 永不写 baseline/trunk，三道闸 parse→commit→meta）。团队路线启用标准=依赖齐全（launcher 可执行且协调服务可用），缺失自动回退。
+Batch 2 过度约束修正（A1-A9）：crash/metric-error/timeout 三分（contract v2.2），Guard 失败/超时/解析失败均非科学否证；min_delta=确认跑触发器非 keep 门槛（同向小正信号保留并记确认状态）；比较口径按研究问题四选一（等墙钟/等 updates/等数据量/收敛）；可编辑范围按任务定义、依赖清单走预授权；评审裁决路由化（revision 与 build 可并行、无修订路径才 Reject、落后≠支配、severity 属于单个 flaw）；红旗降级为定位信号（无 top-3 论文/12 个月 SOTA 窗/外部受益人先验，资源区间=估算缺省）；家族统计仅真 DISCARD 降权（FAILED=fix-and-retry）；UNCONFIRMED（未确认保留候选）≠ DISCARD。
+Batch 3：四仓 README 补常驻控制器入口（start --mode / switch / advance / steer / status）；净 HOME 安装验收三仓 rc=0 且安装产物与提交 diff -r 零差异、README 路由净安装根全通；分发脚本硬编码解释器清除（PY=${ARBOR_PY:-python3}）；危险整根删除回滚示例移除（改 git checkout <tag> && ./install.sh）。
+回归：probe-r29fix 37/37 × 4 仓新鲜重跑 + B2 边界探针 28/28（PKG2/D2/D3 行为级 + D1/D4/A 系静态）+ probe-v9 26/26、mode-15 15/15（verified-then，运行时文件此后字节未变）+ 四仓 run_tests.sh 全过 + arbor pytest 384 过（7 失败为预存缺 demo 资产，基线 HEAD 同缺已核实）。24 条验收断言分级映射：直接演示 12 / 场景保留 9 / 机制核验 3（如实分级）。交付 /home/yyc/outputs/lemvo-r29-fix-20261013/。公开仓无新增受限字样（全树命中均为既有历史条目）。live 未部署（由 ZCode 执行）；真实双 CLI 小预算闭环随后补记。
