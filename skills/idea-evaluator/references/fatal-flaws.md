@@ -190,7 +190,7 @@ within the idea's lifecycle, the flaw remains fatal.
 | F1 | Position against the closest prior work in one sentence: name the delta (combination / new setting / missing baseline / mechanism) and why it holds |
 | F2 | Either switch the venue target to match the contribution type, or reshape the contribution to fit the original venue |
 | F3 | Identify the latest state-of-the-art and add it as the primary baseline. If unavailable, document the recency cutoff and justify |
-| F4 | Name a concrete external beneficiary (a user, a deployed system, a policy question) in the first paragraph of the Introduction |
+| F4 | State who the work serves, judged by the contribution type the paper itself claims (r29 A8: theory, foundations, benchmarks, and negative results legitimately serve the research community — do not demand an invented external application). For applied contributions, name a concrete beneficiary (a user, a deployed system, a policy question) in the first paragraph |
 | F5 | Follow recovery strategies in the lifecycle-capability-matching reference. Narrow scope, partner, reframe category, or pivot |
 | F6 | Design the decisive experiment explicitly and put it at the top of the experiments plan. If infeasible, pivot the claim |
 | F7 | Secure access before proceeding. For IRB, file early. For proprietary data, secure a partnership |

@@ -83,10 +83,15 @@ prep:
 # 历史信息（limit_enforced: no），不清账、不写 0/假上限。
 budget:
   unit: "usd"                     # 金额单位（模型费用唯一累计口径）
-  total_cap: null                 # 金额上限（usd；null 表示未设上限）
-  used: 0.0                       # 已消耗金额（跨后端合计）
+  total_cap: null                 # 金额上限（usd）；null 表示未设上限
+  cap_authorized: no              # r29-fix2（用户决定 2026-10-14）：金额停止门仅当本字段
+                                  # 为 yes 时存在——须真实用户明确授权且 cap_source 可核对。
+                                  # 模型自拟宪章/模板默认/历史孤立数值 ≠ 授权；no/null =
+                                  # 费用只统计、不停止、不缩实验、不逐轮追问补授权
+  cap_source: ""                  # 授权出处（用户原话/消息位置）；来源不可考不启用门
+  used: 0.0                       # 已消耗金额（跨后端合计；恒记录，与门是否生效无关）
   remaining: null                 # = total_cap - used；null 表示未设上限
-  limit_enforced: null            # usd 账恒有门；迁移后的旧非 usd 账标 no（历史阈值失效）
+  limit_enforced: null            # 门只在 cap_authorized: yes 时存在；迁移后的旧非 usd 账标 no
 
 # GPU 小时纯统计（r29 R1 起：只记录报告，不作准入/派发/续跑/晋级/停止限制，
 # 不作为方法评分惩罚；缺测量标 unknown，不猜 0；墙钟见 total 区另记）

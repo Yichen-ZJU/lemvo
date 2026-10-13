@@ -1,5 +1,17 @@
 #!/usr/bin/env bash
-# 参考外层循环脚本 v4.7（round-29：运行时五项修复）
+# 参考外层循环脚本 v4.8（round-29-fix2：费用政策 + 恢复计费 + 迁移修正）
+#  v4.8 变更（对 v4.7，均带隔离回归）：
+#  费用政策（用户决定 2026-10-14）：USD 费用默认只统计、不停止、不缩实验、
+#    不否定方向；金额停止门仅当 budget.cap_authorized: yes（真实用户明确授权、
+#    cap_source 出处可核对）时生效。模型自拟宪章/模板默认/历史孤立数值 ≠
+#    授权；total_cap:null/未设/来源不可考 = 只统计，不逐轮追问补授权。
+#    GPU 小时维持纯统计；token/累计墙钟阈值不得替代金额门成为默认限制。
+#  P1-1 恢复计费：recovered-turn 事件携带 cost_usd_reported 累计快照并参与
+#    后续 cost-delta 差分——序列 1 → 3(恢复) → 4 的账本由 1/3/6 修为 1/3/4；
+#    连续恢复/重复恢复幂等不变。
+#  迁移修正：旧模板行尾注释（used: 7.0  # gpu hours）注释感知解析；已误标
+#    migrated=yes 但 used_hours=unknown 且旧账可解析的项目幂等回填真实用量；
+#    迁移显式标 budget.cap_authorized: no（旧上限数字不构成用户授权）。
 #  v4.7 变更（对 v4.6，均带探针）：
 #  R1 计量单位分账：模型费用（USD）只入 unit=usd 的金额账；GPU hours 从预算
 #    限制中移出成 gpu_usage 纯统计区（无门、无评分惩罚），墙钟另记不混合；
@@ -101,11 +113,14 @@ PYINIT
 作为外层循环逐轮运行（每轮自动结算墙钟/token/进展），或（b）交互式会话
 每轮手动调用本脚本一次（它结算当轮后退出）。只跑 --init 不跑循环 =
 字段存在但永远是 0。
-预算口径（round-23/29）：total_wall_time_min=研究墙钟（引擎调用累计，控制器
-等待/训练不在内）；budget 区只作 USD 金额账（unit=usd 才有派发门与费用
-累计）；GPU 小时是纯统计（gpu_usage 区，gpu-add 记录，永不作准入/派发/
-停止限制，缺测量标 unknown 不补 0）；累计研究预算在 research-state.yaml +
-ledger 持久账本，不随模式/进程重启重置。
+预算口径（round-23/29/r29-fix2）：total_wall_time_min=研究墙钟（引擎调用累计，控制器
+等待/训练不在内）；budget 区只作 USD 金额账——费用恒记录，但金额停止门仅当
+budget.cap_authorized: yes（真实用户明确授权、cap_source 可核对）时存在；
+模型自拟/模板默认/历史孤立数值 ≠ 授权；total_cap:null/未设 = 只统计不停止，
+不逐轮追问补授权。GPU 小时是纯统计（gpu_usage 区，gpu-add 记录，永不作准入/
+派发/停止限制，缺测量标 unknown 不补 0）；token/墙钟阈值不得替代金额门成为
+默认限制。累计研究预算在 research-state.yaml + ledger 持久账本，不随模式/进程
+重启重置。
 WARN
   exit $?
 fi
@@ -144,10 +159,10 @@ python3 -c "import sys; v=float(sys.argv[1]); sys.exit(0 if v>=0 else 1)" "$PREP
 write_helper() {
   cat > "$HELPER" <<'PYEOF'
 #!/usr/bin/env python3
-"""autoloop v4.7 助手（HELPER_VERSION 4.7）。py3.6 兼容，标准库 only。"""
+"""autoloop v4.8 助手（HELPER_VERSION 4.8）。py3.6 兼容，标准库 only。"""
 import fnmatch, hashlib, json, os, re, sys
 
-HELPER_VERSION = "4.7"
+HELPER_VERSION = "4.8"
 STATE = "research-state.yaml"
 BLOCKING = {"HOLD", "STOPPED", "PAUSED", "EVIDENCE_HOLD", "STOPPED_INCONCLUSIVE",
             "BLOCKED", "BLOCKED_USER"}
@@ -221,8 +236,10 @@ def read_fields():
     return f, prep, total
 
 def read_budget():
-    """budget 区（unit/total_cap/used/remaining）；缺失字段返回 None。"""
-    out = {"unit": None, "total_cap": None, "used": None, "remaining": None}
+    """budget 区（unit/total_cap/cap_authorized/cap_source/used/remaining）；
+    缺失字段返回 None。cap_authorized 缺省即 no（金额门默认不生效）。"""
+    out = {"unit": None, "total_cap": None, "cap_authorized": None,
+           "cap_source": None, "used": None, "remaining": None}
     top = ""
     try:
         for raw in open(STATE, encoding="utf-8", errors="replace"):
@@ -268,16 +285,23 @@ def num_or_none(v):
         return None
 
 def cmd_budget_gate():
-    """F2：金额预算派发前闸门。unit=usd 且 cap/used 均为数值且 used >= cap
-    才判耗尽（unknown/缺失不视为耗尽，也不视为无限授权——仅不拦截）。"""
+    """r29-fix2 费用政策（用户决定 2026-10-14）：USD 费用默认只统计、不停止——
+    仅当 budget.cap_authorized: yes（真实用户明确授权、cap_source 出处可核对）
+    时金额门才生效。模型自拟宪章/模板默认值/历史孤立数值 ≠ 授权；
+    total_cap: null / 未设上限 / 授权来源不可考 = 只统计，不拦研究，也不逐轮
+    追问"补授权"。未知值不视为耗尽，也不视为无限授权。GPU 小时与本门无关
+    （纯统计，见 gpu_usage 区）；token/墙钟阈值不得替代本门成为默认限制。"""
     b = read_budget()
     cap, used = num_or_none(b["total_cap"]), num_or_none(b["used"])
+    authorized = (b["cap_authorized"] or "").strip().lower() == "yes"
     exhausted = "unknown"
-    if b["unit"] == "usd" and cap is not None and used is not None:
+    if b["unit"] == "usd" and authorized and cap is not None and used is not None:
         exhausted = "yes" if used >= cap else "no"
     print("BUDGET_UNIT=" + str(b["unit"]))
     print("BUDGET_CAP=" + str(b["total_cap"]))
     print("BUDGET_USED=" + str(b["used"]))
+    print("BUDGET_CAP_AUTH=" + ("yes" if authorized else "no"))
+    print("BUDGET_GATE_ACTIVE=" + ("yes" if authorized else "no"))
     print("BUDGET_EXHAUSTED=" + exhausted)
 
 def cmd_budget_add():
@@ -419,7 +443,10 @@ def migrate_legacy_budget(lines):
     b_unit = b_used = None
     top = ""
     for l in lines:
-        m = re.match(r"^(\s*)([A-Za-z_][\w-]*)\s*:\s*(.*)$", l)
+        # r29-fix2 P2：行尾注释感知——旧模板 `used: 7.0  # gpu hours` 原解析
+        # 把注释吃进数值导致判 unknown 却标 migrated=yes；与 read_budget/read_fields
+        # 同一 strip_inline_comment 口径。
+        m = re.match(r"^(\s*)([A-Za-z_][\w-]*)\s*:\s*(.*)$", strip_inline_comment(l))
         if not m:
             continue
         indent, key, val = len(m.group(1)), m.group(2), m.group(3).strip()
@@ -447,16 +474,24 @@ def migrate_legacy_budget(lines):
         m = re.match(r"\s*([\w-]+)\s*:\s*(.*)$", l)
         if m:
             cur[m.group(1)] = unquote(m.group(2))
-    if str(cur.get("migrated", "no")) == "yes":
-        return False
+    already = str(cur.get("migrated", "no")) == "yes"
     changed = False
     if b_unit == "gpu_hours":
         hist = b_used if (b_used not in (None, "") and num_or_none(b_used) is not None) else "unknown"
-        changed = set_section_key(lines, "gpu_usage", "used_hours", hist)
+        # r29-fix2 P2 补迁：已误标 migrated=yes 但 used_hours 缺失/unknown 且
+        # 旧账数值可解析——回填真实历史用量（不填伪零、不清旧账、幂等）。
+        if (not already) or cur.get("used_hours") in (None, "", "unknown"):
+            if hist != "unknown" or not already:
+                changed = set_section_key(lines, "gpu_usage", "used_hours", hist)
+    if already:
+        return changed
     changed = set_section_key(lines, "gpu_usage", "basis", "legacy-budget-migration") or changed
     changed = set_section_key(lines, "gpu_usage", "source", "budget.unit=" + str(b_unit)) or changed
     changed = set_section_key(lines, "gpu_usage", "migrated", "yes") or changed
     changed = set_section_key(lines, "budget", "limit_enforced", "no") or changed
+    # r29-fix2 费用政策：迁移项目里的旧上限数字不构成用户授权——显式标
+    # cap_authorized: no（门默认不生效），费用只统计。
+    changed = set_section_key(lines, "budget", "cap_authorized", "no") or changed
     return changed
 
 def read_gpu_used(lines):
@@ -760,8 +795,11 @@ def cmd_cost_delta():
     engine = sys.argv[4] if len(sys.argv) > 4 else "codex"
     if engine == "claude":
         prev = None
+        # r29-fix2 P1-1：恢复事件同样携带 cost_usd_reported（累计快照），
+        # 必须参与后续差分——否则恢复轮的金额会被下一正常轮重复计入
+        # （序列 1 → 3(恢复) → 4 曾被记成 1+2+3=6，正确应为 4）。
         for ev in ledger_events():
-            if ev.get("type") in ("work-turn", "prep-turn") and ev.get("sid") == sid:
+            if ev.get("type") in ("work-turn", "prep-turn", "recovered-turn") and ev.get("sid") == sid:
                 v = ev.get("cost_usd_reported")
                 if isinstance(v, (int, float)):
                     prev = v
@@ -933,12 +971,14 @@ except Exception: print(0)' "$TD" 2>/dev/null || echo 0)
     [ "$RBINC" != "unknown" ] && python3 "$HELPER" budget-add "$RBINC" >/dev/null 2>&1 || true
   fi
   RT=$(mktemp)
+  # r29-fix2 P1-1：恢复事件必须携带 cost_usd_reported（引擎上报的累计值），
+  # 与正常轮同一快照口径，供后续 cost-delta 差分——防止恢复轮金额重复入账。
   if [ -n "$U_CUM" ]; then
-    printf '{"type":"recovered-turn","turn_id":"%s","sid":"%s","tokens_in":"%s","tokens_out":"%s","codex_cum":%s,"cost_usd_delta":"%s","ts":"%s"}\n' \
-      "$TURN_ID" "${NEW_SID:-none}" "$U_IN" "$U_OUT" "$U_CUM" "$REC_COST_DELTA" "$(date -u +%FT%TZ)" > "$RT"
+    printf '{"type":"recovered-turn","turn_id":"%s","sid":"%s","tokens_in":"%s","tokens_out":"%s","codex_cum":%s,"cost_usd_reported":"%s","cost_usd_delta":"%s","ts":"%s"}\n' \
+      "$TURN_ID" "${NEW_SID:-none}" "$U_IN" "$U_OUT" "$U_CUM" "$U_COST" "$REC_COST_DELTA" "$(date -u +%FT%TZ)" > "$RT"
   else
-    printf '{"type":"recovered-turn","turn_id":"%s","sid":"%s","tokens_in":"%s","tokens_out":"%s","cost_usd_delta":"%s","ts":"%s"}\n' \
-      "$TURN_ID" "${NEW_SID:-none}" "$U_IN" "$U_OUT" "$REC_COST_DELTA" "$(date -u +%FT%TZ)" > "$RT"
+    printf '{"type":"recovered-turn","turn_id":"%s","sid":"%s","tokens_in":"%s","tokens_out":"%s","cost_usd_reported":"%s","cost_usd_delta":"%s","ts":"%s"}\n' \
+      "$TURN_ID" "${NEW_SID:-none}" "$U_IN" "$U_OUT" "$U_COST" "$REC_COST_DELTA" "$(date -u +%FT%TZ)" > "$RT"
   fi
   helper ledger-append < "$RT" || true; rm -f "$RT"
   append_engine_logs
@@ -1095,14 +1135,16 @@ BUDGET_EXHAUSTED=$(printf '%s\n' "$BG" | sed -n 's/^BUDGET_EXHAUSTED=//p')
 BUDGET_USED_NOW=$(printf '%s\n' "$BG" | sed -n 's/^BUDGET_USED=//p')
 BUDGET_CAP_NOW=$(printf '%s\n' "$BG" | sed -n 's/^BUDGET_CAP=//p')
 if [ "$BUDGET_EXHAUSTED" = "yes" ]; then
-  say "金额预算耗尽：budget.used=${BUDGET_USED_NOW} ≥ total_cap=${BUDGET_CAP_NOW}（usd）——派发前拦截，本轮不调用引擎"
+  say "已授权金额上限耗尽：budget.used=${BUDGET_USED_NOW} ≥ total_cap=${BUDGET_CAP_NOW}（usd，cap_authorized=yes）——派发前拦截，本轮不调用引擎"
   emit_reason "OVER_BUDGET"
   cat <<MSG
-金额预算决策选项（任选其一，全部留痕）：
-  A) 用户提高上限：编辑 $STATE 的 budget.total_cap（须来源可核对），记 authorize 事件后重跑
+金额上限决策选项（任选其一，全部留痕）：
+  A) 用户提高上限：编辑 $STATE 的 budget.total_cap，并把 cap_authorized: yes、
+     cap_source 注明用户指令出处（来源不可核对的数字不构成授权），记 authorize 事件后重跑
   B) 收窄：修改 scope/ready_blocker 后重跑
   C) 终止：touch CAMPAIGN-DONE（交付当前状态；预算耗尽 ≠ 方向被证伪，记 untested）
   D) 查明细：budget.used 由账本逐轮累计（口径见 cost_basis 字段；负 delta=基线重置已按 reported 计）
+说明：未设上限或 cap_authorized 非 yes 时费用只统计、不停止，无需逐轮补授权。
 MSG
   OB=$(mktemp)
   python3 - "$BUDGET_USED_NOW" "$BUDGET_CAP_NOW" <<'PYOB' > "$OB"
@@ -1271,8 +1313,22 @@ CUR_SID="$(cat "$SID_FILE" 2>/dev/null || true)"
 
 # ── 7) 失败分类（A1 收口：服务/账号错误 ≠ 会话死亡 ≠ 研究停滞）──
 if [ "$rc" -ne 0 ]; then
-  # BUG-5：config 拒载优先于服务分类（unknown variant / unrecognized setting 致 exec 未起）
-  if grep -qiE "unknown variant|unrecognized configuration|invalid.*config|failed to (parse|load).*config" "$TD/engine-stdout.jsonl" "$TD/engine-stderr.log" 2>/dev/null; then
+  # r29-fix2：优先按结构化终止事件分类（codex turn.failed / claude result
+  # error 的 error 消息），全日志 grep 降级为无终止事件时的兜底——防止早期
+  # 非致命配置警告遮蔽真正终止原因（试点实录：日志前部有 unrecognized
+  # configuration 忽略警告，真正终止事件是 workspace routing discovery
+  # timed out；旧逻辑对全日志 grep 把网络终止误判 CONFIG_INVALID/rc64）。
+  OB=$(python3 "$HELPER" outcome-from "$TD/engine-stdout.jsonl" 2>/dev/null || true)
+  OUTCOME=$(printf '%s\n' "$OB" | sed -n 's/^OUTCOME=//p')
+  ERRMSG=$(printf '%s\n' "$OB" | sed -n 's/^ERRMSG=//p')
+  if [ "$OUTCOME" = "failed" ] && [ -n "$ERRMSG" ]; then
+    TERM_TEXT="$ERRMSG"
+  else
+    TERM_TEXT="$(tail -n 20 "$TD/engine-stderr.log" 2>/dev/null; tail -n 5 "$TD/engine-stdout.jsonl" 2>/dev/null)"
+  fi
+  # BUG-5：config 拒载判定的对象是真正的终止原因（terminate-reason-first），
+  # 不是全日志任一匹配——警告 ≠ 终止。
+  if printf '%s' "$TERM_TEXT" | grep -qiE "unknown variant|unrecognized configuration|invalid.*config|failed to (parse|load).*config"; then
     say "配置类错误（codex config 拒载/无效键）——不修引擎不改状态，修 config 后重跑"
     parse_usage "$TD/engine-stdout.jsonl" "${CUR_SID:-none}"
     finalize_engine_json "config-error"

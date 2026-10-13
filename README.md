@@ -162,7 +162,8 @@ For unattended long campaigns, use the resident controller (`skills/research-orc
 ```bash
 RUN="$HOME/.claude/skills/research-orchestrator/templates/lemvo-run.sh"
 
-bash "$RUN" start   <project> [--engine codex|claude] [--mode guided|unattended] [--max-turns N]
+bash "$RUN" start   <project> --engine claude|codex [--mode guided|unattended] [--max-turns N]
+                                      # --engine 省略时控制器默认 codex——按所用 CLI 显式指定，勿依赖默认
 bash "$RUN" switch  <project> guided|unattended  # 轮边界生效；切 unattended 且无人持锁时自动拉起 / takes effect at turn boundaries
 bash "$RUN" advance <project> [steer文件]        # 控制器活跃=提交推进请求，不并行开第二套循环 / hands the request to the single owner
 bash "$RUN" steer   <project> <消息文件>          # 指导入不可变队列（原子发布） / immutable steer queue, atomic publish

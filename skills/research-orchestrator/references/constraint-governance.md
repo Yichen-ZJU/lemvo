@@ -42,7 +42,7 @@ stages / mutable_by / reconsider_when / status。普通描述性文字不必录�
 | kind | 含义 | 默认处理 |
 |---|---|---|
 | safety_boundary | 密钥、数据泄漏、他人资产与 GPU 等真实安全边界 | 始终遵守；方法论文不能解除 |
-| approved_resource_cap | 已批准的 GPU·h/token/费用/流量/磁盘上限 | 执行守住；增加上限需相应授权 |
+| approved_resource_cap | 真实用户明确授权的资源上限（费用金额须 cap_authorized + 出处可核对） | 执行守住；提高/扩大需相应授权。模型自拟宪章、模板默认值、历史字段里的孤立数字 ≠ 已批准——费用默认只统计不停止（r29-fix2 用户决定）；GPU·h 纯统计不设门，也不得把 GPU 门换成墙钟/token 隐性替代 |
 | availability_snapshot | 当前可用模型/数据/设备/缺凭据等现状 | 重新盘点并在既有授权内调配；不泛化为永久禁止 |
 | design_default | 代理选择的 teacher/配方/搜索范围/诊断顺序/门槛 | 探索阶段可依理由自主修订；费用受总账约束 |
 | scientific_assumption | "教师需要更强""某通道不可学"等推断 | 记录 scope 与证据；可更新或做代表性实验；不当天然硬门 |

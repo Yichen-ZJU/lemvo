@@ -21,7 +21,8 @@
 #  E1 start/advance 共用 step：入队→对账→组装本批 steer+回执→派发→本批
 #     成功后才确认（advance 也注入回执；活作业时指导先入队再返回等待）。
 #  控制动作词汇（.lemvo-control.jsonl）：continue / waiting_jobs / needs_user /
-#     completed / runtime_error —— 与 result.json next_action 同词汇。
+#     completed / paused / runtime_error —— 与 result.json next_action 同词汇。
+#     paused（r29-fix2）= 运行器暂停（轮预算用完等），不表示课题完成。
 # 架构不变：控制器（零模型调用）→ autoloop 单轮原语 → 引擎。
 # 状态机：RUNNING / WAITING_JOB / WAITING_USER / BLOCKED / COMPLETED
 # 用法：
@@ -62,6 +63,7 @@ set_status() {  # $1=状态[|细节]（或 $1=状态 $2=细节）；中央解析
     WAITING_JOB) act=waiting_jobs;;
     WAITING_USER|BLOCKED) act=needs_user;;
     COMPLETED) act=completed;;
+    PAUSED) act=paused;;   # r29-fix2：运行器暂停（如 max-turns）——非课题完成
     *) act=runtime_error;;
   esac
   if [ "${st}${det}" != "$CTL_LAST" ]; then
@@ -652,7 +654,10 @@ while :; do
   # 模式与终态
   [ -f CAMPAIGN-DONE ] && { set_status "COMPLETED|campaign-done"; log "项目已完成——退出（不重开终态）"; exit 0; }
   TURN=$((TURN + 1)); echo "$TURN" > .lemvo-turn-count
-  [ "$TURN" -gt "$MAX_TURNS" ] && { set_status "COMPLETED|max-turns"; log "max-turns 到达——退出"; exit 0; }
+  # r29-fix2：max-turns 是运行器暂停（轮预算用完），不是课题完成——
+  # 无产物也绝不记 COMPLETED（COMPLETED 只留给引擎报告的 campaign-done）。
+  # 续跑：再次 start/advance 即可（轮数重新计数，状态/预算保留）。
+  [ "$TURN" -gt "$MAX_TURNS" ] && { set_status "PAUSED|max-turns"; log "max-turns 到达——运行器暂停（课题未声明完成；续跑请再 start/advance）"; exit 0; }
 
   # C5：每轮先对账（活作业与未消费回执优先，不先调模型）
   stamp_jobs_started
