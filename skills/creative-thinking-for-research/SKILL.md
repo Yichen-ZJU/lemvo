@@ -351,17 +351,30 @@ Any idea that survives all four phases and passes the two-sentence test is worth
 
 ## Usage Instructions for Agents
 
+**First read the run mode** from the project's `.lemvo-mode` (the single
+project-wide source; see research-orchestrator). Mode governs *whether you
+stop to ask*, never *what you may decide*:
+
+- **guided**: walk the researcher through each framework interactively,
+  asking them to supply domain-specific content.
+- **unattended** (with clear goal/scope/authorization): do NOT wait
+  step-by-step. Apply the frameworks autonomously from existing materials,
+  mark provisional assumptions, and select the best-fitting structural match
+  (fidelity + assets + cost) within the authorized envelope. Batch any
+  blocking unknowns into one question only if they change authorization,
+  safety, or execution validity.
+
 When a researcher asks for help with creative thinking or novel ideation:
 
 1. **Assess the block**: What kind of thinking are they stuck in? (See Common Creative Blocks table)
-2. **Select 2-3 frameworks** based on the block type
-3. **Walk through each framework interactively**, asking the researcher to supply domain-specific content
+2. **Select frameworks** based on the block type (2-3 for open exploration; 1 for a localized bottleneck)
+3. **Apply the frameworks** — guided: interactively, researcher supplies content; unattended: autonomously from existing materials, marking provisional assumptions
 4. **Push for structural depth**: If an analogy or combination is surface-level, probe deeper
 5. **Maintain a running list** of all generated ideas, even unusual ones
 6. **Apply the two-sentence test** to candidates that survive exploration
-7. **Hand off to the brainstorm skill** for systematic evaluation (diverge → converge → refine)
+7. **Hand off** — guided: to the researcher / brainstorm skill for evaluation; unattended: to the candidate card (`../shared-references/grounded-ideation.md`) and next minimal probe
 
-Mechanism-grounded candidate handoff (structure-mapping → candidate card with falsifiable prediction): `skills/shared-references/grounded-ideation.md`.
+Mechanism-grounded candidate handoff (structure-mapping → candidate card with falsifiable prediction): `../shared-references/grounded-ideation.md`.
 
 **Key Principles**:
 - Generative mode first, evaluative mode second — do not filter prematurely

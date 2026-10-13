@@ -5,5 +5,6 @@ cd "$(dirname "$0")/.."
 python3 tests/queue_state_test.py
 python3 tests/queue_integration_test.py  # real screen/process chain (E04 guard), skips if no screen
 python3 tests/queue_namespace_test.py     # real screen namespace coexistence (E05), skips if no screen
+python3 tests/ideation_blindtest_fixture_test.py  # grounded-ideation blindtest fixture (no model)
 bash tests/installer_test.sh
 echo "== ALL TEST SUITES PASSED =="

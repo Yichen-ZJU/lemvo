@@ -34,7 +34,7 @@ authorization), never by scores or verdict counts alone.
 
 ## When to use this skill
 
-Mechanism-grounded ideation handoff (gap finding / cross-domain mechanism / candidate card): see `skills/shared-references/grounded-ideation.md` — this evaluator routes candidates; it is not a pre-execution tribunal.
+Mechanism-grounded ideation handoff (gap finding / cross-domain mechanism / candidate card): see `../shared-references/grounded-ideation.md` — this evaluator routes candidates; it is not a pre-execution tribunal.
 
 - The user has a draft idea and asks whether it is worth pursuing.
 - The user asks for novelty check, feasibility assessment, or scoring.

@@ -117,7 +117,7 @@ Breakthroughs often come from resolving tensions between widely accepted but see
 
 Borrowing structural ideas from other disciplines is one of the most generative research heuristics. Many foundational techniques emerged this way—attention mechanisms draw from cognitive science, genetic algorithms from biology, adversarial training from game theory.
 
-Mechanism-grounded construction interface (source mapping, candidate card, experiment handoff): `skills/shared-references/grounded-ideation.md` — on-demand, not a mandatory phase.
+Mechanism-grounded construction interface (source mapping, candidate card, experiment handoff): `../shared-references/grounded-ideation.md` — on-demand, not a mandatory phase.
 
 **Requirements for a Valid Analogy**:
 - **Structural fidelity**: The mapping must hold at the level of underlying mechanisms, not just surface similarity
@@ -295,9 +295,18 @@ A strong research idea should be defensible in two sentences to a smart non-expe
 
 Use this end-to-end workflow to go from blank page to ranked research ideas.
 
+**Scale the effort to the task — the quantity goals below are suggestions for a
+full blank-topic exploration, not mandatory quotas.** For a localized bottleneck
+(a known method to fix, a specific gap to fill), skip straight to the relevant
+framework and the candidate handoff; producing a handful of targeted candidates
+is sufficient. Do not run the whole Diverge → Converge → Refine pipeline when a
+narrower path serves the goal.
+
 ### Phase 1: Diverge (Generate Candidates)
 
-**Goal**: Produce 10-20 candidate ideas without filtering.
+**Suggested goal** (full blank-topic explorations): produce ~10-20 candidates
+without filtering; for a localized bottleneck, generate only what the targeted
+framework yields.
 
 1. **Scan for tensions** (Framework 3): List 5 trade-offs in your field
 2. **Check what changed** (Framework 5): List 3 recent shifts (compute, data, regulation)
@@ -308,7 +317,8 @@ Use this end-to-end workflow to go from blank page to ranked research ideas.
 
 ### Phase 2: Converge (Filter and Rank)
 
-**Goal**: Narrow to 3-5 strongest ideas.
+**Suggested goal** (full explorations): narrow to 3-5 strongest; localized
+tasks may keep the single best candidate and move on.
 
 Apply these filters to each candidate:
 
@@ -326,16 +336,20 @@ the idea is worthless.
 
 ### Phase 3: Refine (Sharpen the Winner)
 
-**Goal**: Turn the top idea into a concrete research plan.
+**Suggested for full explorations**; a localized fix may need only the
+two-sentence pitch and the next minimal probe.
 
 1. Write the two-sentence pitch (Framework 10)
 2. Identify the core tension being resolved (Framework 3)
 3. Specify the abstraction level (Framework 2)
-4. List 3 concrete experiments that would validate the idea
+4. List the concrete experiments that would validate the idea (3 is a
+   suggestion, not a quota — one decisive direct comparison often suffices)
 5. Anticipate the strongest objection and prepare a response
-6. Define a 2-week pilot that would provide signal on feasibility
+6. Define a feasibility pilot **sized to the task** (a 2-week pilot is one
+   option, not a requirement — a bounded CPU/minimal probe is often enough)
 
-**Completion Checklist**:
+**Completion Checklist** (for full explorations; localized tasks check only
+what applies):
 - [ ] Two-sentence pitch is clear and compelling
 - [ ] Problem is genuine (problem-first check passed)
 - [ ] Approach is justified (simplicity test passed)
@@ -378,17 +392,33 @@ Not sure which framework to start with? Use this decision guide:
 
 ## Usage Instructions for Agents
 
+**First read the run mode** from the project's `.lemvo-mode` (the single
+project-wide source; see research-orchestrator). Mode governs *whether you
+stop to ask*, never *what you may decide*:
+
+- **guided**: walk the researcher through frameworks interactively and pause
+  at the natural hand-off points below.
+- **unattended** (with clear goal/scope/authorization): do NOT wait for the
+  researcher step-by-step. Read the existing materials, mark unknowns as
+  provisional, choose the executable candidate(s) yourself within the
+  authorized envelope and budget, and proceed to the candidate handoff /
+  next minimal probe. Ask the user only when a missing fact genuinely changes
+  authorization, safety, or execution validity — batch such questions into
+  one stop, and never expand budget or lift a red line on your own.
+
 When a researcher asks for help brainstorming research ideas:
 
 1. **Identify their starting point**: Are they exploring a new area, stuck on a current project, or evaluating an existing idea?
-2. **Select appropriate frameworks**: Use the Framework Selection Guide to pick 2-3 relevant lenses
-3. **Walk through frameworks interactively**: Apply each framework step-by-step, asking the researcher for domain-specific inputs
-4. **Generate candidates**: Aim for 10-20 raw ideas across frameworks
-5. **Filter and rank**: Apply the Converge phase filters to narrow to top 3-5
-6. **Refine the winner**: Help articulate the two-sentence pitch and define concrete next steps
+2. **Select appropriate frameworks**: Use the Framework Selection Guide to pick the frameworks relevant to the starting point (2-3 for a full exploration; 1 for a localized bottleneck). Scale the effort to the task — do not force the full template on a narrow fix.
+3. **Apply the frameworks** — mode-dependent:
+   - guided: walk through interactively, asking the researcher for domain-specific inputs at each step.
+   - unattended: apply the frameworks autonomously from existing materials, marking provisional assumptions; batch any blocking unknowns into one question only if they change authorization/safety/validity.
+4. **Generate candidates**: for a full exploration, ~10-20 raw ideas is a useful target; for a localized bottleneck, a handful of targeted candidates is enough.
+5. **Filter and rank**: Apply the Converge-phase filters; scale to the task (full exploration → top 3-5; localized → the single best candidate).
+6. **Refine and hand off**: sharpen the winner to a concrete next step (candidate card via `../shared-references/grounded-ideation.md` where applicable), then hand to the next stage.
 
 **Key Principles**:
 - Push for specificity—vague ideas ("improve efficiency") are not actionable
 - Challenge assumptions—ask "why?" at least three times
 - Maintain a written list of all candidates, even rejected ones (they may recombine later)
-- The researcher makes the final call on which ideas to pursue; the agent facilitates structured thinking
+- **Mode decides who picks, not whether to proceed.** guided: the researcher makes the final call, the agent facilitates structured thinking. unattended (authorized): the agent selects within the envelope and proceeds, recording the choice and its basis.
