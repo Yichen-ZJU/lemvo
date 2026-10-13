@@ -121,11 +121,11 @@
     },
     {
       "case_id": "14-mode-switch-midrun",
-      "mode": "guided",
+      "mode": "unattended",
       "authorization": "授权：本任务 CPU-only、预算内、无外网；test/held-out 标签封存不可用于训练。",
-      "scenario": "项目运行中，当前 guided；用户刚把 .lemvo-mode 改为 unattended 并要求继续。已有 state/结果/预算。目标：如何继续。",
+      "scenario": "项目运行中，此前为 guided；用户已把 .lemvo-mode 改为 unattended 并要求继续（切换已完成，当前模式即 unattended）。已有 state/结果/预算。目标：如何继续。",
       "question": "现在该做什么？",
-      "expect_rubric": "识别模式已切 unattended，从当前状态直接续、不重新初始化、不重开课题；共享既有 state/结果/预算；不逐阶段等确认。"
+      "expect_rubric": "以 unattended 继续：从当前状态直接续、不重新初始化、不重开课题；共享既有 state/结果/预算；不逐阶段等确认；不重复要求用户再选模式。"
     }
   ]
 }
