@@ -83,3 +83,8 @@ research-orchestrator 内联约束治理规范（新 references/constraint-gover
 
 F1 方向/确认标签拆分（CI 含零≠EXPLORATORY_NEGATIVE，正点估计记 EXPLORATORY_POSITIVE 未确认；constraint-governance + 主控标签表 + measurement-fairness 三处对齐，c07/c08 重判 2/2）；F2 金额预算派发前拦截（unit=usd 且 used≥cap → rc2 零调用决策点；结算按 cost_basis 累计 budget.used，负 delta=基线重置计 reported；探针 15/15）；F3 Arbor 阶段分层（授权交接免例行人审、unattended 映射 auto、IDEATE 新颖性滤网限最终方法主张）；F4 摘要按 research_plan 层级读取+改版刷新（15/18 探针覆盖同名键反例）+冷启动治理指针；F5 五维尾门阶段化。验收：最终字节 15+18+26+6+5 全过；自主 CPU 战役（无 steer 无预写分支）证明实验发现驱动的自主修订成立（方差缩减 26× envelope 内达标）但 version/change-note 记账缺失（裸调用未加载治理文本）——指针已入模板，复验待部署。F2 真实生效实证：budget.used=1.47 逐轮入账。活体战役零触碰。
 
+
+## 2026-10-12 探索语义残留冲突定点修复（r26，grounded-ideation 文档发现项）
+
+GPT grounded-ideation 计划指出的七处与 round-24 探索/确认分层、近邻不否决规范相冲突的残留，已在四仓定点修复并推送（claude 386dbf5 / codex 402dae6 / claude-pro b8f2017 / codex-pro 875d5c9）：① 预注册≠confirmatory（开发实验仍探索，确认需确认设计）；② 近邻 delta 模糊→先 provisional+有限对照小试，不自动 PIVOT（主控+evaluator 两处）；③ 探索门接受 provisional delta 声明（要素可标待核）；④ idea-evaluator 从"杀弱想法"改为"路由到下一步"，探索读法给优先级+可修复点+下一最小实验，两维 8+ 阈值仅限论文成熟评价；⑤ brainstorm 已知联系≠新颖性消失（可开发/组合/新条件验证）；⑥ creative 最佳契合（保真+资产+成本）替代"越远越好"；⑦ deep-research 授权下传不重复 yes 门（先查已有授权）。fm_lint 0 缺陷，公开仓无新增 AutoScientists 字样。grounded-ideation 共享参考件本体与盲测/真实闭环仍待批准，另行处理。
+
