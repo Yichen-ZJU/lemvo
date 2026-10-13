@@ -117,6 +117,8 @@ Breakthroughs often come from resolving tensions between widely accepted but see
 
 Borrowing structural ideas from other disciplines is one of the most generative research heuristics. Many foundational techniques emerged this way—attention mechanisms draw from cognitive science, genetic algorithms from biology, adversarial training from game theory.
 
+Mechanism-grounded construction interface (source mapping, candidate card, experiment handoff): `skills/shared-references/grounded-ideation.md` — on-demand, not a mandatory phase.
+
 **Requirements for a Valid Analogy**:
 - **Structural fidelity**: The mapping must hold at the level of underlying mechanisms, not just surface similarity
 - **Non-obvious connection**: A well-known link is a lower-novelty signal

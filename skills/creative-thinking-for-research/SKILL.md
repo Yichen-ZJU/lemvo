@@ -361,6 +361,8 @@ When a researcher asks for help with creative thinking or novel ideation:
 6. **Apply the two-sentence test** to candidates that survive exploration
 7. **Hand off to the brainstorm skill** for systematic evaluation (diverge → converge → refine)
 
+Mechanism-grounded candidate handoff (structure-mapping → candidate card with falsifiable prediction): `skills/shared-references/grounded-ideation.md`.
+
 **Key Principles**:
 - Generative mode first, evaluative mode second — do not filter prematurely
 - Fit to the current bottleneck outranks domain distance — a nearby mechanism that genuinely solves the problem beats a distant analogy that needs heavy adaptation

@@ -60,6 +60,14 @@ This is an execution request, not a request to explain or implement the workflow
 不晋级的候选，必须是违反了 delta 四要件（写不出增量），而不是违反了
 "无人做过"这类不存在的要求。发现此类误杀要在 verifier 报告中点名。
 
+## 定向构思接口（按需，非必执行）
+
+当调研已锁定一个具体瓶颈、需要"哪篇论文的哪个机制适合当前瓶颈"时，按
+`skills/shared-references/grounded-ideation.md` 的机制检索与候选交接章节走：
+复用本项目已有文献产物做定向阅读，产出候选卡（falsifiable_prediction +
+refutation_condition 为必填字段）交给实验环节。这是交接接口，不是调研产物的
+新增必交物；独立深调研仍按本文件 Step 1-7 与全文核验政策执行。
+
 ## Required Artifacts
 
 Derive a short slug from the topic: lowercase, hyphenated, no filler words, at most 5 words.
