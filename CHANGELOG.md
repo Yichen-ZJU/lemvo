@@ -88,3 +88,7 @@ F1 方向/确认标签拆分（CI 含零≠EXPLORATORY_NEGATIVE，正点估计�
 
 GPT grounded-ideation 计划指出的七处与 round-24 探索/确认分层、近邻不否决规范相冲突的残留，已在四仓定点修复并推送（claude 386dbf5 / codex 402dae6 / claude-pro b8f2017 / codex-pro 875d5c9）：① 预注册≠confirmatory（开发实验仍探索，确认需确认设计）；② 近邻 delta 模糊→先 provisional+有限对照小试，不自动 PIVOT（主控+evaluator 两处）；③ 探索门接受 provisional delta 声明（要素可标待核）；④ idea-evaluator 从"杀弱想法"改为"路由到下一步"，探索读法给优先级+可修复点+下一最小实验，两维 8+ 阈值仅限论文成熟评价；⑤ brainstorm 已知联系≠新颖性消失（可开发/组合/新条件验证）；⑥ creative 最佳契合（保真+资产+成本）替代"越远越好"；⑦ deep-research 授权下传不重复 yes 门（先查已有授权）。fm_lint 0 缺陷，公开仓无新增 AutoScientists 字样。grounded-ideation 共享参考件本体与盲测/真实闭环仍待批准，另行处理。
 
+
+## 2026-10-12 grounded-ideation 共享接口（IdeaScientist 借鉴，无新 skill）
+
+新增 skills/shared-references/grounded-ideation.md（共享参考件非 skill，公开技能数仍 115）：gap→跨域机制→提案三段链（arXiv:2610.04074 消融量化依据 + r26 机制契合优先修正）、候选卡 13 字段（新增 falsifiable_prediction/refutation_condition 必填，交接工具非许可门，准入仍 READY_TO_PROBE）、结果回流七条。六主技能短链接按需触发。结构探针 28/28，fm_lint 0 缺陷，四仓推送核验（f54373f/44220e4/a5014d1/c76bacc）。盲测与真实双 CLI 闭环未跑，待批准。
