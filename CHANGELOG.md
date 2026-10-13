@@ -102,3 +102,8 @@ GPT grounded-ideation 计划指出的七处与 round-24 探索/确认分层、�
 
 独立评审复现的确定缺口已修：lemvo-run.sh start 原无条件 `echo unattended > .lemvo-mode` 覆盖已选 guided（启动与重启均如此）。现支持 `--mode guided|unattended`（显式指定优先），未指定时**保留已有合法值不覆盖**，无合法值才默认 unattended；无效 --mode 忽略并记日志。启动/重启都保留选择，switch 与运行中切换不变。盲测夹具补模式覆盖（12→14 案，加 guided 交接 + 中途切换案）+ 全案授权字段 + source_refs 校验（修真自检空操作），BLINDTEST.md 补写 .lemvo-mode 步骤。回归：probe-mode-start-r28 8/8、probe-v9 26/26、fm_lint 115/115/178/181 零缺陷、四仓 run_tests.sh 过。四仓推送（7f85334/0afc578/6ece6ac/c2e28e4）。盲测 RUN + 双 CLI 闭环待批预算；live 未部署。
 
+
+## 2026-10-13 r29：被拒 start 不改配置 + 参数缺值 rc64 + 盲测案例 14 修正
+
+评审 P1：重复 start 曾被锁拒绝却仍先改 .lemvo-mode/引擎，把活 guided 控制器偷偷切 unattended。修：参数解析后**成功拿 owner 锁才应用模式与引擎配置**，被拒 start 不再改动活控制器；switch 不变。评审 P2：裸 --mode/--max-turns/--engine 缺值原卡解析死循环，现统一 need_value 校验缺值即 rc64 用法错误。盲测案例 14 原 mode=guided 却 expect unattended 自相矛盾，统一为 unattended（切换已完成）。回归 probe-mode-start 扩至 15 检查（活 owner 拒绝重启不改模式/引擎/不新增派发 + switch 恢复推进 + 缺值 rc64），probe-v9 26/26，fm_lint 115/115/178/181 零缺陷。四仓推送（c2a51bd/28c7f8d/d71754b/dc13546）。盲测 RUN + 双 CLI 闭环待批预算；live 未部署。
+
