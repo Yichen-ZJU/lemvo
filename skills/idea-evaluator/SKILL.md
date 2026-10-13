@@ -189,13 +189,20 @@ Issue one of three verdicts:
   lifecycle fit. For an exploration read: a clear dominant axis and no
   CRITICAL flaw suffice — the verdict is a priority signal, not an
   execution gate.
-- **Accept with Revisions**: pivot the scope per recommendations
-  before starting. Some dimensions weak, fixable flaws, or lifecycle
-  mismatch that can be shortened.
-- **Reject and Pivot**: do not pursue this version. Dominated by a
-  prior benchmark or method, or unfixable capability mismatch. Severity
-  is a property of each flaw itself, never a count of flaws — multiple
-  fixable (MAJOR) flaws route to Accept with Revisions, not Reject.
+- **Accept with Revisions**: pursue with the recommended scope
+  adjustments — revision and building can proceed in parallel where the
+  recommendations do not block the first experiment (r29 A8: revision
+  is not a mandatory precondition for starting). Some dimensions weak,
+  fixable flaws, or lifecycle mismatch that can be shortened.
+- **Reject and Pivot**: do not pursue this version as scoped. Unfixable
+  capability mismatch (within budget), or dominance with **no
+  identifiable revision path** (new angle, new conditions, or a scoped
+  subset the existing method does not cover). Currently being behind an
+  existing method/SOTA is not by itself dominance — record the gap and
+  the improvement path; the idea can continue as improvement work
+  (r29 A8). Severity is a property of each flaw itself, never a count
+  of flaws — multiple fixable (MAJOR) flaws route to Accept with
+  Revisions, not Reject.
 
 Emit the evaluation in the Output format below.
 

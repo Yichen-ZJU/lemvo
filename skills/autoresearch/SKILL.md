@@ -56,7 +56,7 @@ Session files: `autoresearch.md`, `autoresearch.sh`, `autoresearch.jsonl`, `resu
   - `arch`：只做架构/方法级改动，不在参数上磨
   - `auto`（默认）：不设限，每轮由选步表按上轮结果自由决定（参数级和架构级可混用）
 - **Guard 命令**（可选但推荐）：每轮必须通过的安全检查（如冒烟测试）
-- **min_delta**（可选）：小于此幅度的"改进"视为噪声，触发确认跑
+- **min_delta**（可选）：小于此幅度的改进触发确认跑——它是**追加测量触发器，不是 keep 门槛**（r29 A7）：复测后同向小正信号保留并记录确认状态；只有任务/用户显式声明"最小实用效应"时才按声明决定保留
 - maxIterations（默认 20；无人值守模式建议 50+ 或 unlimited）
 
 未明确指定 scale 时默认 `auto` 并在确认计划时向用户说明。
@@ -106,20 +106,22 @@ Session files: `autoresearch.md`, `autoresearch.sh`, `autoresearch.jsonl`, `resu
 <benchmark 命令> > run-<N>.log 2>&1   # 每迭代独立日志，禁止覆盖 / tee / 直接输出
 grep "^<metric_name>:" run-<N>.log    # 只提取指标行
 ```
-grep 为空 = 崩溃，`tail -n 50 run-<N>.log` 看栈。results.tsv 的 iteration 列与日志文件号一一对应，可对账。
+grep 为空 ≠ 直接判崩溃——先分类（r29 A6：进程退出码 / 解析状态 / 科学成绩三者分开）：退出码非零或有栈 = **crash**（`tail -n 50 run-<N>.log` 看栈）；退出码为零但日志里有合法指标、只是格式与 grep 模式不符（如 JSON `{"accuracy":0.91}` vs `^accuracy:`）= **metric-error**（适配失配，修提取模式后重新提取，不改评判协议）；退出码为零且全无指标 = 按 crash 排查。results.tsv 的 iteration 列与日志文件号一一对应，可对账。
 **同迭代内的每次执行各用各的文件**：确认跑 `run-<N>-confirm<K>.log`（K=1,2，各自留档），第 K 次修复跑 `run-<N>-fix<K>.log`——同文件覆盖会让崩溃证据链断掉。
 
 ### 4.5 Verify（噪声防护）
-- 改进幅度 < min_delta → **确认跑**：重跑 1-2 次取中位数再判定（日志写 `run-<N>-confirm.log`）
-- 指标非数字/提取失败 → 记 `metric-error`，revert
+- 改进幅度 < min_delta → **确认跑**：重跑 1-2 次取中位数确认方向一致性（日志写 `run-<N>-confirm.log`）；中位数仍同向改进 → **keep 并记录确认状态**（小正信号不因低于任意绝对阈值被抹掉，r29 A7；仅任务/用户显式声明的最小实用效应可另作保留门槛）
+- 指标非数字/提取失败 → 记 `metric-error`，先按 4.4 分类：格式适配失配则修提取模式重新提取（评判协议不变），commit 确实坏掉才 revert
 
 ### 4.6 Guard（如配置）
-Guard 失败 → 无论指标如何都 revert，记 `guard-fail`。可重试一次不同实现，仍失败则换方向。
+Guard 失败 → 无论指标如何都 revert（保护可运行分支），记 `guard-fail`，先定位工程原因、暂存候选。修复重试上限只约束当前迭代——Guard 失败是工程事件，**不构成方向否证**（r29 A6）。
 
-### 4.7 Decide（六态）
-- **keep**：指标改进（超 min_delta）且 Guard 过 → 分支前进
+### 4.7 Decide（分态判定，与 contract v2.2 status 枚举一致）
+- **keep**：指标按既定比较口径改进（过确认跑的见 4.5）且 Guard 过 → 分支前进
 - **discard**：指标变差 → `git revert HEAD --no-edit`（**不用 reset —— 失败保留在历史里供学习**）；revert 后按本轮 iter-start 快照校验文件内容确已还原
-- **crash**：运行崩溃 → 语法/导包错误立即免费修复重跑（日志 `run-<N>-fix<K>.log`）；运行时错误最多自动修 3 次；修不好 revert 记 crash
+- **crash**：运行崩溃 → 语法/导包错误立即免费修复重跑（日志 `run-<N>-fix<K>.log`）；运行时错误最多自动修 3 次（只限当前迭代，不据此否证方法）；修不好 revert 记 crash，metric 列留空（不写占位 0）
+- **timeout**：超过 kill 阈值的执行中断 → revert 记 `timeout`，**不是科学否证**（r29 A4）；等时间协议下在描述里注明协议性不可比
+- **metric-error**：正常退出但指标解析失败 → 按 4.4 分类处置，不与 crash 混记
 - **no-op**：本轮无有效改动
 - **blocked**：外部依赖失效（数据集/服务/权限）
 

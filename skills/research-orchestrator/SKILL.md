@@ -45,35 +45,16 @@ argument-hint: <research-question-or-project-dir>
 | **新课题 forge 起跑** | 研究想法 + 代码库，无上述循环文件，且**需要可交付的自驱实验包**（无人值守/跨机交接） | `experiment-forge` 造包（锁定评估+开放文件+契约随包）→ autoresearch 执行；不需要交付包时可直接走下面的迭代路线 |
 | **裸库直接迭代** | 研究想法 + 可迭代代码库，无循环文件，不需要交付包 | autoresearch 就地工作（就地生成运行契约/评测命令即可）；forge 可选不强制 |
 | **SOTA 复现改进** | 任务有明确评测基准/榜单 + 存在可信 SOTA 公开实现 + 改进空间是增量型（方法/训练/效率），非全新范式 | 调研产物=候选 SOTA 清单（论文+官方代码+已报告指标，按可信度排序）；复现**限时**，目标"能跑通+指标量级对上"（复现值在报告值 ±5% 内），失败两次换实现或降级为"以官方 checkpoint 为基线"；autoresearch 直接在 SOTA 代码库上迭代（最小化改造，不重新造实验框架）；KEEP/DISCARD 以"是否超过 eval_baseline（预注册冻结的复现 SOTA 基线）"为准；代码保留对照 best_value（当前最佳实现）——两者是 research-state.yaml 的两个独立字段，92<93 时成果记改进、代码不覆盖最佳 |
-| **假设树深挖**（Pro） | 单一核心目标 + 允许多分支并行探索与剪枝 | Arbor（`arbor-research-agent` 入口） |
-| **团队多方案竞争**（Pro） | 单一优化项目或开放方向均可——团队内部提多方案互评竞争；用户点名团队作战时优先 | AutoScientists（autoscientist/ 启动器）；与 Arbor 不互斥，按任务性质二选一或接力 |
 
 **可用性过滤（先于偏好选择）**：选择路线前先检测该后端在本环境
-是否真实存在——`skills/arbor-research-agent/`、`skills/autoscientist/`
-（或已配置的 launcher 路径）目录存在性检查。不可用后端**跳过并在
-research-state.yaml 注明"需要 Pro 部署"**；这不是科研否决门，只影响
-本环境可选菜单。
-
-
-**AutoScientists 交接规格（codex-pro 无内置 launcher，REQUIRED）**：
-本仓不含 `autoscientist/` 目录；launcher 位于 claude-for-research-pro  checkout
-的 `autoscientist/launch.py`（以本机实际 checkout 绝对路径为准，可用
-`AUTOSCIENTIST_LAUNCHER` 环境变量覆盖）。orchestrator 决定走团队路线后：
-1. 生成 `TASK.md`——frontmatter 四字段必填：`name` / `task_type`
-   （optimization|exploration）/ `metric` / `direction`（higher|lower），
-   正文写目标与停滞退出条件（如"连续 10 次无 KEEP 即停"）；**正文同时
-   携带**：research_plan 的 stage / plan_version / 活跃约束 ID 清单 /
-   确认范围引用（active_confirmation_ref）——后端不自行重建更苛刻的门；
-2. 生成 `LAUNCH.md`——以 `autoscientist/task-autoresearch/LAUNCH.md` 为
-   底稿（claude-pro checkout 内），替换任务字段；
-3. 运行 `$AUTOSCIENTIST_LAUNCHER --task <dir> --output-dir <runs/>`；
-4. 交接行写入 backend_ledger：backend=autoscientists、local_cap、停止标准、
-   stage、plan_version。
+是否真实存在——对应引擎的 skill 目录（或已配置的 launcher 路径）
+存在性检查。不可用后端**跳过并在 research-state.yaml 注明"本环境
+未部署"**；这不是科研否决门，只影响本环境可选菜单。
 
 **通用交接规则（任一路线命中后 REQUIRED）**：引擎身份、局部预算与停止
-标准（autoresearch maxIterations/timeout；Arbor cycle cap/收益递减；
-AutoScientists profile 截止/KEEP streak）、已消耗资源记入
-research-state.yaml；换引擎 = 新交接行，累计账不清零。
+标准（autoresearch maxIterations/timeout；其他引擎按各自 profile 的
+停止标准）、已消耗资源记入 research-state.yaml；换引擎 = 新交接行，
+累计账不清零。
 
 | 研究活动 | 路由到 |
 |---|---|
@@ -81,9 +62,9 @@ research-state.yaml；换引擎 = 新交接行，累计账不清零。
 | 长文档/PDF 精读 | `summarize`、`pdf-explore` |
 | 假设头脑风暴 | `brainstorming-research-ideas`、`creative-thinking-for-research` |
 | 任务包锻造（锁定评估+开放文件） | `experiment-forge` |
-| 内循环实验（改→测→留/滚） | 小调整/快速迭代 → `autoresearch` skill 或直接按 program.md；无人值守批量 → `experiment-forge` 造包 + autoresearch 执行。深度攻坚/广度撒网引擎（Arbor/AutoScientists）属 Pro 部署；公开版用 forge 造包 + 无人值守接力覆盖 |
+| 内循环实验（改→测→留/滚） | 小调整/快速迭代 → `autoresearch` skill 或直接按 program.md；无人值守批量 → `experiment-forge` 造包 + autoresearch 执行；深度攻坚/广度撒网 → forge 造包（锁定评估+开放文件+契约随包）+ 无人值守接力/并行多包覆盖 |
 | 授权下传（调用任何子技能时 REQUIRED） | orchestrator 已批准的 scope、预算、环境、恢复意图视为已授权并显式传给子技能；子技能在授权下只对新增实质性选择提问，不重复确认（autoresearch Step 1-3、forge 逐项确认在授权下跳过）。授权下传**限定为真实已授权 envelope 内的规划决定**——orchestrator 自称批准不能创建人类未给的预算或资产权限；也不能让子技能对已授权 scope 重复要求用户确认 |
-| 后端交接（调用任一实验引擎时 REQUIRED） | 在 research-state.yaml 显式记录：后端身份、后端局部预算与停止标准（autoresearch maxIterations/timeout；Arbor cycle cap/收益递减；AutoScientists profile 截止/KEEP streak）、已消耗资源；切换后端时累计预算连续计入同一研究目标。交接同时携带 `research_plan` 的 **stage / plan_version / 活跃约束 ID 清单 / 确认范围引用**——下游后端不得自行重建更苛刻的门或论文级准入 |
+| 后端交接（调用任一实验引擎时 REQUIRED） | 在 research-state.yaml 显式记录：后端身份、后端局部预算与停止标准（autoresearch maxIterations/timeout；其他引擎按各自 profile 的停止标准）、已消耗资源；切换后端时累计预算连续计入同一研究目标。交接同时携带 `research_plan` 的 **stage / plan_version / 活跃约束 ID 清单 / 确认范围引用**——下游后端不得自行重建更苛刻的门或论文级准入 |
 | 微调执行 | `peft`、`unsloth`、`llama-factory` |
 | 分布式训练 | `pytorch-fsdp2`、`deepspeed`、`megatron-core`、`accelerate` |
 | 蒸馏/压缩/长上下文 | `knowledge-distillation`、`model-pruning`、`long-context` |
@@ -150,7 +131,7 @@ research-state.yaml；换引擎 = 新交接行，累计账不清零。
 ```
 BOOTSTRAP（一次，轻量）
   明确问题 → literature-review 摸底 → 形成初始假设 → 锁定评估标准
-  双闸门（REQUIRED，纪律内联于此；Pro 版有显式 rq-gates 协议文件）：
+  双闸门（REQUIRED，纪律内联于此）：
   Gate 0（输入模糊才触发，带证据引导的方向选择）；Gate 1（FINER 五维
   + scope 边界 + 方法论蓝图 + 魔鬼代言人 checkpoint——**用途是摸底与
   暴露弱点，不是数值否决门**：不设分数线，不过闸不循环重审；Novel/
@@ -351,7 +332,10 @@ research-state.yaml 的 supported / refuted / inconclusive 字段承担全部
   作业不得重复提交。done_file 推荐写 JSON 结果：
   `{"run_id","status":"succeeded|failed","exit_code","metrics":{...}}`——控制器
   按 run_id/status/exit_code 判终态（非空非 JSON 哨兵仅向后兼容视为完成，
-  **pid 结束 ≠ 成功**，status 缺失 ≠ 成功）。作业完成/超时/失败/损坏会生成
+  **pid 结束 ≠ 成功**，status 缺失 ≠ 成功）。**结果文件用临时文件 + rename
+  原子发布**（先写 `result.json.tmp-$$` 再 `mv` 覆盖）——写了一半的 JSON
+  会被识别为"预期 JSON 但损坏"：生产者仍在跑就继续等待，生产者已结束则记
+  非成功终态，两种情况都不会被当成成功唤醒下一轮。作业完成/超时/失败/损坏会生成
   `.lemvo-receipts/` 回执（schema `lemvo-job-receipt`，含 run_id/exit_code/
   host/metrics）并在下一轮注入（读结果、改方法、勿重跑同 run_id）。
 - **每轮闭环凭据**：控制器为每轮写 `turns/<turn_id>/manifest.json` 与
@@ -376,10 +360,13 @@ research-state.yaml 的 supported / refuted / inconclusive 字段承担全部
 未决清单 —— 停止，不自动宣称方向为假，也不为结束而补机制故事。
 
 **论文成熟（更严的标准，只决定"是否值得写论文"）**：有一个强支持的
-发现？能解释 WHY 它 work？findings.md 能撑起有说服力的 abstract？未
+发现——证据要求与论文实际声称的贡献类型相称：机制类主张需要机制
+证据；经验/系统/基准类贡献按其自身声明的主张评估，不强制补机制
+解释或理论证明（r29 A9）。findings.md 能撑起有说服力的 abstract？未
 成熟也可交付上述研究产物，只是不进入 FINALIZE。
 
-阴性结果的连贯集合也是可发表的贡献："X 不 work 因为 Y"。
+阴性结果的连贯集合也是可发表的贡献："X 不 work 因为 Y"；机制解释
+是证据类型之一，不是所有论文的必要条件。
 
 ## 产出约定
 

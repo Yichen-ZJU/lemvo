@@ -112,24 +112,35 @@ Reviewers flag this as overclaiming.
 
 ### F2 detection
 
-- Ask: what is the target venue, and what are the top three papers
-  from that venue's most recent edition?
-- Red flag: the idea's contribution type does not appear in those
-  three papers.
+- Ask: what is the target venue, and what contribution types does it
+  actually publish? Check recent editions for evidence — the specific
+  sample (how many papers, which edition) is a positioning probe, not
+  a rule (r29 A8: no fixed "top three papers" prior).
+- Positioning signal, not a validity verdict: if the idea's
+  contribution type is rare at that venue, re-target the venue or
+  reframe the contribution — the idea itself is not wrong.
 
 ### F3 detection
 
-- Ask: what is the strongest public result on the target benchmark
-  as of the most recent three months?
-- Red flag: the student's baseline is more than 12 months old or
-  does not cite a 2026 result.
+- Ask: what is the strongest publicly recognized result on the target
+  benchmark **as of task start**? Verify against the benchmark's
+  leaderboard, the original implementations, or the task contract's
+  declared baseline (r29 A8: recency is judged against the task's
+  actual SOTA at start — no fixed "within 12 months" or
+  "must cite <current year>" calendar windows).
+- Positioning signal: a weak or outdated baseline weakens the claim,
+  not the idea — the fix is re-baselining (or declaring the official
+  checkpoint as baseline), which is a plan revision.
 
 ### F4 detection
 
-- Ask: if this problem were solved tomorrow, who would benefit, and
-  how much?
-- Red flag: the answer is "other researchers studying this narrow
-  problem" without naming an external beneficiary.
+- Ask: who benefits if this works, judged by the contribution type the
+  paper itself claims? Theory, foundations, benchmarks, and negative
+  results legitimately serve the research community — do not demand an
+  invented external application (r29 A8).
+- Positioning signal: "unclear who cares" against the paper's own
+  claimed contribution type means the motivation section needs work,
+  not that the idea must be abandoned.
 
 ### F5 detection
 

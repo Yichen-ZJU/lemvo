@@ -11,28 +11,28 @@ argument-hint: <task-description>
 
 ```
 <task-dir>/
-├── prepare.py        # 🔒 锁定：数据准备、tokenizer/dataloader、评估函数。agent 禁止修改
-├── train.py          # 🔓 开放：agent 唯一可编辑的文件（模型、优化器、训练循环、超参）
+├── prepare.py        # 🔒 锁定：数据准备、tokenizer/dataloader、评估函数。agent 禁止修改（评估真实性保护）
+├── train.py          # 🔓 开放：默认开放文件（模型、优化器、训练循环、超参）
 ├── program.md        # 🧭 人类可迭代：给 agent 的研究组织指令（用 templates/program.md 生成）
-├── pyproject.toml    # 依赖清单 —— agent 禁止新增依赖
+├── pyproject.toml    # 依赖清单 —— 变更须走任务契约的预授权流程（声明包+版本、隔离环境安装）
 └── results.tsv       # 实验台账（表头由 forge 生成，agent 追加行，不提交 git）
 ```
 
-名字按任务实际调整（比如 `evaluate.py`/`model.py`），但 **锁定/开放/指令 三件套不可缺**。
+名字按任务实际调整（比如 `evaluate.py`/`model.py`），但 **锁定/开放/指令 三件套不可缺**。可编辑范围按任务定义（r29 A5）：数据选择、增强、表示、tokenizer 等训练方法组件可以纳入开放范围（多个开放文件合法）；锁定范围只保护评估与数据 ground truth——评估完整性需要保护，训练流水线不因评估保护而永久不可改。
 
 ## 任务契约（Forge 时一次确认；被 orchestrator 调用则视为已授权）
 
 逐项确认**一次完成**（一条消息列全），不逐条追问；被 research-orchestrator 调用时视为上游已授权（BOOTSTRAP 双闸门），直接采用 state 里的 scope/预算/环境，只对**新增实质性选择**（预算扩张、权限变化、评估口径改变）提问。
 
-1. **固定 wall-clock 预算**：每次实验跑固定时长（如 5 分钟/30 分钟），不按 step/epoch —— 否则 agent 换大模型就"作弊"赢了。
+1. **比较口径（按研究问题选择，r29 A4）**：等 wall-clock / 等 updates（步数）/ 等数据量（tokens）/ 训练到约定收敛——Forge 时与研究问题一起选定并写进 program.md。固定时长只是可选协议之一（适合"固定算力下谁更好"的问题），不是普适公平标准；更慢但效果更好的方法不能仅因跑得慢记科学失败。
 2. **架构无关指标**：指标必须对架构改动公平（karpathy 用 val_bpb 而非 loss，因为 loss 随 vocab size 变）。问用户："换个架构/分词器/特征，这个指标还可比吗？"不可比就换指标。
 3. **评估代码锁定**：评估函数、数据加载、随机种子控制放在锁定文件里，是 ground truth。
-4. **超时即失败**：超过 ~2× 预算的运行 kill 掉记 `discard`。
+4. **失控作业护栏**：超过 kill 阈值（如 ~2× 协议时长）的运行 kill 掉，记为**执行中断（timeout）**——不是方法否证；在"等时间"协议下它同时意味着该次不可比（协议性 discard），其他口径下修复后重跑或按外循环授权继续。
 5. **VRAM/资源软约束**：允许合理增长，不允许爆炸。
 6. **首跑必基线**：第一次运行必须是不改任何代码的 baseline。
 7. **简洁性准则**：同等效果更简为赢；0.001 提升加 20 行 hack 不值得。
-8. **Guard 防回归**：配一条每轮必须通过的安全命令（如冒烟测试 `pytest -x tests/smoke`）。指标涨但 Guard 挂 → 照样 revert。
-9. **min_delta 确认跑**：改进幅度小于阈值时视为噪声 —— 重跑 1-2 次取中位数再定 keep/discard。
+8. **Guard 防回归**：配一条每轮必须通过的安全命令（如冒烟测试 `pytest -x tests/smoke`）。指标涨但 Guard 挂 → 照样 revert（保护可运行分支），失败先定位工程原因，重试上限只约束当前批次，不构成方向否证。
+9. **min_delta 确认跑（追加测量触发器，r29 A7）**：改进幅度小于阈值 → 重跑 1-2 次取中位数确认方向一致性；复测后同向小正信号**保留**（keep，确认状态照记），不因"没到某个绝对数"抹掉。只有任务/用户显式声明了"最小实用效应"时，才按该声明决定是否保留。
 
 ## 安全红线（所有生成的 program.md 必须包含）
 
@@ -44,19 +44,19 @@ argument-hint: <task-description>
 - 破坏性 git 操作：`git push --force`、`git reset --hard` 到循环外状态、`git clean -fd`
 - 杀掉不是本实验启动的进程
 - 向外部网络发送数据（除非任务明确要求）
-- 修改锁定文件（prepare.py / 评估脚本 / 依赖清单）——任何情况下
+- 修改锁定文件（prepare.py / 评估脚本）——任何情况下；依赖清单不静默改动，走契约的预授权声明流程（网络、费用与数据边界照常遵守）
 
 ## Git 即台账
 
 - 每次运行开专支：`autoresearch/<tag>`（tag 用日期，如 `jul26`）
-- 每次实验一个 commit；指标改进 → 分支前进（keep）；持平/变差 → `git revert HEAD --no-edit`（discard，**失败保留在历史里供学习，不用 reset**）；崩溃 → 记 `crash`；超时不算崩溃，直接 discard 不重试
+- 每次实验一个 commit；指标改进 → 分支前进（keep）；持平/变差 → `git revert HEAD --no-edit`（discard，**失败保留在历史里供学习，不用 reset**）；崩溃 → 记 `crash`；超时 → 记 `timeout`（执行中断，不是科学否证——r29 A4），在等时间协议下额外注明协议性 discard； Guard/解析失败与科学成绩分开记录（r29 A6）
 **契约单一来源（包内技术约定）**：任务包生成与 autoresearch 执行共用 `references/contract.md`（results.tsv 9 列表头、循环边界、crash/revert、Guard、min_delta、日志命名）；模板或本文与契约在这些**包内技术约定**上冲突时以契约为准。契约不覆盖人类权限、批准资源上限与全局阶段语义（见 contract.md 头部优先级范围与 research-orchestrator/references/constraint-governance.md）。
 
 - `results.tsv` **不提交 git**，列（与 autoresearch 执行器一致）：`iteration timestamp commit metric delta guard status move description`（TAB 分隔，逗号会在描述里断掉）
 
 ## Forge 流程
 
-1. 问清：任务目标、指标+方向、wall-clock 预算、运行命令、哪些文件开放/锁定、依赖是否已装好、GPU 需求。
+1. 问清：任务目标、指标+方向、**比较口径**（等时间/等 updates/等数据量/训练到约定收敛，r29 A4）、资源 envelope 与 kill 阈值、运行命令、**可编辑范围**（哪些文件开放/锁定，r29 A5）、**依赖授权**（预授权清单还是禁止变更）、GPU 需求。
 2. 生成目录结构；`prepare.py`/`train.py` 优先从用户现有代码改造（把评估逻辑抽进锁定文件），不要从零发明。
 3. 用 `templates/program.md` 生成 `program.md`，替换所有 `<PLACEHOLDER>`。
 4. **契约随包**：把 `references/contract.md` 复制为 `<pkg>/references/contract.md`——任务包独立交付时

@@ -76,12 +76,25 @@ prep:
   next_min_probe: ""             # 就绪后的最小真实 probe 描述
   session_id: null               # 外层循环续接会话 id（按项目持久化）
 
-# 累计预算总账（跨后端连续；换后端不清零——第六轮预算下传机制的落点）
+# 金额预算总账（跨后端连续；换后端不清零——第六轮预算下传机制的落点）
+# r29（R1）：本区只作 USD 金额账——unit=usd 才有派发门与模型费用累计；
+# GPU 小时不是预算单位（见下方 gpu_usage 纯统计区）。历史 gpu_hours 配置
+# 会在首次结算时一次性迁移：旧 used 转记 gpu_usage，cap 保留为注明失效的
+# 历史信息（limit_enforced: no），不清账、不写 0/假上限。
 budget:
-  unit: "gpu_hours"               # 资源单位（gpu_hours | usd | wall_hours）
-  total_cap: null                 # 本研究目标的累计上限
-  used: 0.0                       # 已消耗（跨后端合计）
+  unit: "usd"                     # 金额单位（模型费用唯一累计口径）
+  total_cap: null                 # 金额上限（usd；null 表示未设上限）
+  used: 0.0                       # 已消耗金额（跨后端合计）
   remaining: null                 # = total_cap - used；null 表示未设上限
+  limit_enforced: null            # usd 账恒有门；迁移后的旧非 usd 账标 no（历史阈值失效）
+
+# GPU 小时纯统计（r29 R1 起：只记录报告，不作准入/派发/续跑/晋级/停止限制，
+# 不作为方法评分惩罚；缺测量标 unknown，不猜 0；墙钟见 total 区另记）
+gpu_usage:
+  used_hours: unknown             # 累计 GPU·h（按作业/卡数/型号口径累计）
+  basis: unknown                  # 计量口径（measured | estimated | legacy-budget-migration）
+  source: none                    # 数据来源（runner 回执/作业账/迁移出处）
+  migrated: no                    # 旧 gpu_hours 预算一次性迁移标记
 
 # 外层循环实测总账（autoloop 脚本维护；助手读写本节——与 budget 分开）
 total:
@@ -90,11 +103,12 @@ total:
   total_cost: null                # 可得费用估计
   total_tokens_in: 0              # 引擎输入 token 累计（--json usage 事件解析）
   total_tokens_out: 0             # 引擎输出 token 累计
+  cost_usd_total: unknown         # 非 usd 预算项目下模型费用美元统计（无门、只报告）
 
 # 后端交接日志（每次切换/启动引擎追加一行，不覆盖）
 backend_ledger: []
 # - timestamp: ""
-#   backend: "autoresearch | arbor | autoscientists | forge"
+#   backend: "autoresearch | arbor | forge"
 #   handoff: ""                   # 交接时传入的局部预算与停止标准
 #   local_cap: null
 #   local_used: 0.0

@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
-# 参考外层循环脚本 v4.6（round-26：codex 线联调六缺陷修复）
-#  v4.6 变更（对 v4.5，均带探针）：
+# 参考外层循环脚本 v4.7（round-29：运行时五项修复）
+#  v4.7 变更（对 v4.6，均带探针）：
+#  R1 计量单位分账：模型费用（USD）只入 unit=usd 的金额账；GPU hours 从预算
+#    限制中移出成 gpu_usage 纯统计区（无门、无评分惩罚），墙钟另记不混合；
+#    旧非 usd 预算一次性迁移（历史用量与 cap 原样保留注明失效，不清账、
+#    不写 0/假上限）；unknown 不补 0；新增 gpu-add 统计入口。
+#  R3 阻塞态组合值（如 HOLD|PAUSED）单引号输出——source 按数据读取，
+#    管道符不再成为 shell 语法（多阻塞字段不再 rc1 崩溃）。
+#  R4 孤儿轮恢复把恢复出的 engine/SID 传给计量解析（codex 累计差分复用
+#    正常结算口径，不再落 0/0 假账）；恢复轮费用同口径入账；重复恢复由
+#    result.json 守卫幂等。
+#  v4.6 变更（round-26：codex 线联调六缺陷修复）：
 #  BUG-1 bootstrap：STATE 缺失 → 首轮消息改 bootstrap 指令（建 STATE+首个产物），
 #    不再 READY 循环模板；settle/account/budget-add 对缺失 STATE 不崩溃；
 #    连续 5 轮零产物（引擎 rc=0 礼貌空转）→ rc2 决策点（STALL_NO_ARTIFACT）。
@@ -43,7 +53,7 @@
 #  引擎身份在 cd 后读取、双引擎适配、结构化 rc6/7 映射。
 # 红线：替换活体战役脚本前先备份；对在跑进程只观察不杀。
 set -uo pipefail
-HELPER_VERSION="4.6"
+HELPER_VERSION="4.7"
 
 # ── --init 模式 ──
 if [ "${1:-}" = "--init" ]; then
@@ -91,10 +101,11 @@ PYINIT
 作为外层循环逐轮运行（每轮自动结算墙钟/token/进展），或（b）交互式会话
 每轮手动调用本脚本一次（它结算当轮后退出）。只跑 --init 不跑循环 =
 字段存在但永远是 0。
-预算口径（round-23）：total_wall_time_min=研究墙钟（引擎调用累计，控制器
-等待/训练不在内）；GPU/训练时长按 runner 回执（.lemvo-receipts 的 metrics）
-计；累计研究预算在 research-state.yaml + ledger 持久账本，不随模式/进程
-重启重置。
+预算口径（round-23/29）：total_wall_time_min=研究墙钟（引擎调用累计，控制器
+等待/训练不在内）；budget 区只作 USD 金额账（unit=usd 才有派发门与费用
+累计）；GPU 小时是纯统计（gpu_usage 区，gpu-add 记录，永不作准入/派发/
+停止限制，缺测量标 unknown 不补 0）；累计研究预算在 research-state.yaml +
+ledger 持久账本，不随模式/进程重启重置。
 WARN
   exit $?
 fi
@@ -133,10 +144,10 @@ python3 -c "import sys; v=float(sys.argv[1]); sys.exit(0 if v>=0 else 1)" "$PREP
 write_helper() {
   cat > "$HELPER" <<'PYEOF'
 #!/usr/bin/env python3
-"""autoloop v4.6 助手（HELPER_VERSION 4.6）。py3.6 兼容，标准库 only。"""
+"""autoloop v4.7 助手（HELPER_VERSION 4.7）。py3.6 兼容，标准库 only。"""
 import fnmatch, hashlib, json, os, re, sys
 
-HELPER_VERSION = "4.6"
+HELPER_VERSION = "4.7"
 STATE = "research-state.yaml"
 BLOCKING = {"HOLD", "STOPPED", "PAUSED", "EVIDENCE_HOLD", "STOPPED_INCONCLUSIVE",
             "BLOCKED", "BLOCKED_USER"}
@@ -145,7 +156,11 @@ PREP_DEFAULTS = [("prep_turns", "0"), ("prep_wall_time_min", "0.0"), ("prep_cost
                  ("last_informative_artifact", "none"), ("last_artifact_sha", "none"),
                  ("ready_blocker", "none"), ("next_min_probe", "none"), ("session_id", "null")]
 TOTAL_DEFAULTS = [("total_turns", "0"), ("total_wall_time_min", "0.0"), ("total_cost", "null"),
-                  ("total_tokens_in", "0"), ("total_tokens_out", "0")]
+                  ("total_tokens_in", "0"), ("total_tokens_out", "0"),
+                  ("cost_usd_total", "unknown")]
+# R1：GPU 小时只统计不限制——独立于 budget 区，无任何门读取本区
+GPU_DEFAULTS = [("used_hours", "unknown"), ("basis", "unknown"), ("source", "none"),
+                ("migrated", "no")]
 DEFAULT_ARTIFACT_GLOBS = "runs/*:experiments/*:results/*:*metrics*.json:eval*.json:*-preds.jsonl"
 
 def strip_inline_comment(line):
@@ -266,10 +281,12 @@ def cmd_budget_gate():
     print("BUDGET_EXHAUSTED=" + exhausted)
 
 def cmd_budget_add():
-    """F2：结算时累计 budget.used。argv: budget-add <increment|unknown>
+    """F2 结算累计（R1 单位分账）：模型费用（USD）只入 unit=usd 的金额账
+    budget.used/remaining；非 usd 旧账（gpu_hours/wall_hours 等）不再吸收美元
+    费用——增量改记 total.cost_usd_total 纯统计（无门、只报告）。
+    used 显式 unknown/坏值不补 0、不累计。argv: budget-add <increment|unknown>
     increment 由调用方按成本口径算好（per-call/delta>=0 用 delta；
-    负 delta=基线重置用 reported；unknown 不加）。只动 budget 区，
-    不碰 prep/total 总账。剩余量随 cap 联动；cap 缺失不写 remaining。"""
+    负 delta=基线重置用 reported；unknown 不加）。"""
     global LINES
     inc = sys.argv[2] if len(sys.argv) > 2 else "unknown"
     if inc == "unknown":
@@ -281,6 +298,18 @@ def cmd_budget_add():
     if not os.path.exists(STATE):
         print("BUDGET_USED_NOW=state-missing"); return
     b = read_budget()
+    if b["unit"] != "usd":
+        _, _, total = read_fields()
+        cur = num_or_none(total.get("cost_usd_total"))
+        newv = incf if cur is None else round(cur + incf, 6)
+        LINES = open(STATE, encoding="utf-8").read().splitlines()
+        set_section_key(LINES, "total", "cost_usd_total", newv)
+        open(STATE, "w", encoding="utf-8").write("\n".join(LINES) + "\n")
+        print("BUDGET_ADD_SKIPPED=non-usd-unit(" + str(b["unit"]) + ")")
+        print("COST_USD_TOTAL_NOW=" + str(newv))
+        return
+    if b["used"] not in (None, "") and num_or_none(b["used"]) is None:
+        print("BUDGET_USED_NOW=unknown"); return
     used = num_or_none(b["used"])
     if used is None:
         used = 0.0
@@ -292,6 +321,37 @@ def cmd_budget_add():
         set_in("budget", "remaining", round(cap - used, 6))
     open(STATE, "w", encoding="utf-8").write("\n".join(LINES) + "\n")
     print("BUDGET_USED_NOW=" + str(used))
+
+def cmd_gpu_add():
+    """R1：GPU 小时纯统计入口（只记录，永不作门）。argv:
+    gpu-add <hours|unknown> [basis] [source]
+    unknown 不补 0 也不动账；数值累加进 gpu_usage.used_hours 并记录计量口径。
+    本命令与美元账本、预算门完全无关。"""
+    global LINES
+    if not os.path.exists(STATE):
+        print("GPU_USED_NOW=state-missing"); return
+    hours = sys.argv[2] if len(sys.argv) > 2 else "unknown"
+    basis = sys.argv[3] if len(sys.argv) > 3 else ""
+    source = sys.argv[4] if len(sys.argv) > 4 else ""
+    LINES = open(STATE, encoding="utf-8").read().splitlines()
+    changed = False
+    if hours != "unknown":
+        try:
+            h = float(hours)
+        except ValueError:
+            h = None
+        if h is not None:
+            cur = num_or_none(read_gpu_used(LINES))
+            newv = h if cur is None else round(cur + h, 6)
+            changed = set_section_key(LINES, "gpu_usage", "used_hours", newv)
+    if basis:
+        changed = set_section_key(LINES, "gpu_usage", "basis", basis) or changed
+    if source:
+        changed = set_section_key(LINES, "gpu_usage", "source", source) or changed
+    if changed:
+        open(STATE, "w", encoding="utf-8").write("\n".join(LINES) + "\n")
+    got = read_gpu_used(LINES)
+    print("GPU_USED_NOW=" + (str(got) if got is not None else "unknown"))
 
 def cmd_plan_info():
     p = read_plan()
@@ -305,7 +365,8 @@ def init_sections(f, prep, total):
     except OSError:
         return False
     changed = False
-    for name, defaults in (("prep", PREP_DEFAULTS), ("total", TOTAL_DEFAULTS)):
+    for name, defaults in (("prep", PREP_DEFAULTS), ("total", TOTAL_DEFAULTS),
+                           ("gpu_usage", GPU_DEFAULTS)):
         idxs = [i for i, l in enumerate(lines) if section_header(name).match(l)]
         if not idxs:
             lines.extend([name + ":"] + ["  " + k + ": " + v for k, v in defaults])
@@ -325,9 +386,95 @@ def init_sections(f, prep, total):
                 lines.insert(end, "  " + k + ": " + v)
                 end += 1
                 changed = True
+    changed = migrate_legacy_budget(lines) or changed
     if changed:
         open(STATE, "w", encoding="utf-8").write("\n".join(lines) + "\n")
     return changed
+
+def set_section_key(lines, section, key, val):
+    """在指定顶层区内替换或追加 2 级缩进键；区不存在返回 False。"""
+    si = None
+    for i, l in enumerate(lines):
+        if re.match(r"^" + section + r"\s*:", l):
+            si = i
+    if si is None:
+        return False
+    end = si + 1
+    while end < len(lines) and (not lines[end].strip() or lines[end][0] in " #"):
+        end += 1
+    for i in range(si + 1, end):
+        m = re.match(r"(\s*)" + key + r"\s*:\s*(.*)$", lines[i])
+        if m:
+            lines[i] = m.group(1) + key + ": " + str(val)
+            return True
+    lines.insert(end, "  " + key + ": " + str(val))
+    return True
+
+def migrate_legacy_budget(lines):
+    """R1 一次性迁移：旧 budget.unit 非 usd（gpu_hours/wall_hours 等）→ 历史用量
+    转记 gpu_usage 统计区（仅 gpu_hours；其他单位语义不符不转、保持 unknown），
+    标 migrated=yes；budget 区 cap/used 原样保留为注明失效的历史信息——
+    不写 0、不设假上限、不清账。预算门与费用累计只认 usd，旧阈值自此退出
+    一切控制逻辑。缺区/缺字段照常续跑，不要求先补表才能实验。"""
+    b_unit = b_used = None
+    top = ""
+    for l in lines:
+        m = re.match(r"^(\s*)([A-Za-z_][\w-]*)\s*:\s*(.*)$", l)
+        if not m:
+            continue
+        indent, key, val = len(m.group(1)), m.group(2), m.group(3).strip()
+        if indent == 0:
+            top = key
+        elif top == "budget" and indent == 2:
+            if key == "unit":
+                b_unit = unquote(val)
+            elif key == "used":
+                b_used = unquote(val)
+    if b_unit is None or b_unit == "usd":
+        return False
+    gi = None
+    for i, l in enumerate(lines):
+        if re.match(r"^gpu_usage\s*:", l):
+            gi = i
+            break
+    if gi is None:
+        return False
+    end = gi + 1
+    while end < len(lines) and (not lines[end].strip() or lines[end][0] in " #"):
+        end += 1
+    cur = {}
+    for l in lines[gi + 1:end]:
+        m = re.match(r"\s*([\w-]+)\s*:\s*(.*)$", l)
+        if m:
+            cur[m.group(1)] = unquote(m.group(2))
+    if str(cur.get("migrated", "no")) == "yes":
+        return False
+    changed = False
+    if b_unit == "gpu_hours":
+        hist = b_used if (b_used not in (None, "") and num_or_none(b_used) is not None) else "unknown"
+        changed = set_section_key(lines, "gpu_usage", "used_hours", hist)
+    changed = set_section_key(lines, "gpu_usage", "basis", "legacy-budget-migration") or changed
+    changed = set_section_key(lines, "gpu_usage", "source", "budget.unit=" + str(b_unit)) or changed
+    changed = set_section_key(lines, "gpu_usage", "migrated", "yes") or changed
+    changed = set_section_key(lines, "budget", "limit_enforced", "no") or changed
+    return changed
+
+def read_gpu_used(lines):
+    gi = None
+    for i, l in enumerate(lines):
+        if re.match(r"^gpu_usage\s*:", l):
+            gi = i
+            break
+    if gi is None:
+        return None
+    end = gi + 1
+    while end < len(lines) and (not lines[end].strip() or lines[end][0] in " #"):
+        end += 1
+    for l in lines[gi + 1:end]:
+        m = re.match(r"\s*used_hours\s*:\s*(.*)$", l)
+        if m:
+            return unquote(m.group(1))
+    return None
 
 def ledger_append(obj):
     with open(".autoloop-prep-ledger.jsonl", "a", encoding="utf-8") as fh:
@@ -404,8 +551,12 @@ def cmd_block_check():
     states = [f["campaign_status"], f["measurement_state"], f["project_status"],
               f["root_status"], f["status"]]
     blocking = [s.upper() for s in states if s and s.upper() in BLOCKING]
-    print("BLOCKING=" + ("|".join(blocking) if blocking else "none"))
-    print("WAITING=" + ("yes" if any(s.upper() == "WAITING_RESOURCE" for s in states if s) else "no"))
+    def q(v):
+        return "'" + str(v).replace("'", "'\\''") + "'"
+    # R3：组合值（如 HOLD|PAUSED）必须单引号输出——source 按数据读取，
+    # 管道符不得成为 shell 语法（旧版裸输出会当管道执行 rc1）
+    print("BLOCKING=" + q("|".join(blocking) if blocking else "none"))
+    print("WAITING=" + q("yes" if any(s.upper() == "WAITING_RESOURCE" for s in states if s) else "no"))
 
 def cmd_settle():
     """S1 凭据类型化：进展 = artifact 匹配建设类白名单 且 sha 变化。
@@ -485,7 +636,8 @@ def cmd_usage_from():
     reasoning_output_tokens）。argv: usage-from <file> [sid] [engine]
     engine=codex 且有 sid 时按 SID 从账本取上次累计求差（与 cost-delta 同
     构）；负差=基线重置按当轮累计计。旧版 codex（逐轮值）不受影响——
-    账本中无同 SID 累计基线时以当轮值为基线。"""
+    账本中无同 SID 累计基线时以当轮值为基线。R4：sid 缺失（如孤儿轮恢复
+    归因失败）时不再退回逐轮 sums 印假 0，按无基线口径取当轮值。"""
     engine = sys.argv[4] if len(sys.argv) > 4 else ""
     sid = sys.argv[3] if len(sys.argv) > 3 else "none"
     sums = {"in": 0, "out": 0, "cr": 0, "cw": 0}
@@ -529,13 +681,16 @@ def cmd_usage_from():
                 modelusage = True
     except OSError:
         pass
-    # codex 累计 → 当轮差值（基线从账本同 SID 最近一条带 codex_cum 的事件取）
-    if engine == "codex" and sid != "none" and any(v is not None for v in cum.values()):
+    # codex 累计 → 当轮差值（基线从账本同 SID 最近一条带 codex_cum 的事件取）。
+    # R4：SID 归因不可得（sid=none）不再退回逐轮 sums（codex 事件是累计值，
+    # 那条路径只会印出假 0）——按无基线口径取当轮=累计值，unknown 保持 unknown。
+    if engine == "codex" and any(v is not None for v in cum.values()):
         prev = {}
-        for ev in ledger_events():
-            cc = ev.get("codex_cum")
-            if ev.get("sid") == sid and isinstance(cc, dict):
-                prev = cc
+        if sid != "none":
+            for ev in ledger_events():
+                cc = ev.get("codex_cum")
+                if ev.get("sid") == sid and isinstance(cc, dict):
+                    prev = cc
         out_vals = {}
         for sk in ("in", "out", "cr", "cw"):
             cur = cum[sk]
@@ -673,6 +828,7 @@ if __name__ == "__main__":
     elif cmd == "last-authorize-cap": cmd_last_authorize_cap()
     elif cmd == "budget-gate": cmd_budget_gate()
     elif cmd == "budget-add": cmd_budget_add()
+    elif cmd == "gpu-add": cmd_gpu_add()
     elif cmd == "plan-info": cmd_plan_info()
     else: sys.exit(2)
 PYEOF
@@ -747,7 +903,9 @@ except Exception: print("")' "$TD" 2>/dev/null)
   [ -n "$NEW_SID" ] && echo "$NEW_SID" > "$SID_FILE"
   helper init >/dev/null 2>&1 || true
   helper settle >/dev/null 2>&1 || say "recover：settle 失败（保留现场）"
-  parse_usage "$OUT"
+  # R4：把恢复出的 engine/SID 传给计量解析——复用正常结算口径（codex 累计差分），
+  # 不再落 0/0 假账；归因不可得时 helper 按无基线口径取当轮值，unknown 保持 unknown
+  parse_usage "$OUT" "${NEW_SID:-none}"
   # 墙钟：manifest.started_utc → 现在（尽力而为）
   RECOVER_WALL=$(python3 -c 'import json,sys,time
 try:
@@ -757,9 +915,31 @@ try:
     print(max(0, int(time.time() - d.replace(tzinfo=datetime.timezone.utc).timestamp())))
 except Exception: print(0)' "$TD" 2>/dev/null || echo 0)
   python3 "$HELPER" account "${RECOVER_WALL:-0}" "$U_IN" "$U_OUT" >/dev/null 2>&1 || true
+  # R4：恢复轮费用与正常结算同口径（codex=per-call；claude 按 SID 差分）——
+  # 不重复累加（重复 recover 由 result.json 守卫拦截）
+  REC_COST_DELTA="unknown"; REC_COST_BASIS="unknown"
+  if [ "$U_COST" != "unknown" ]; then
+    RCD_OUT=$(python3 "$HELPER" cost-delta "${NEW_SID:-none}" "$U_COST" "$ENGINE" 2>/dev/null || true)
+    REC_COST_DELTA=$(printf '%s\n' "$RCD_OUT" | sed -n 's/^COST_DELTA=//p')
+    REC_COST_BASIS=$(printf '%s\n' "$RCD_OUT" | sed -n 's/^COST_BASIS=//p')
+    [ -z "$REC_COST_DELTA" ] && REC_COST_DELTA=unknown
+    [ -z "$REC_COST_BASIS" ] && REC_COST_BASIS=unknown
+  fi
+  if [ "$REC_COST_DELTA" != "unknown" ]; then
+    RBINC="$REC_COST_DELTA"
+    case "$(python3 -c "import sys; sys.exit(0 if float(sys.argv[1]) < 0 else 1)" "$REC_COST_DELTA" 2>/dev/null; echo $?)" in
+      0) RBINC="$U_COST";;   # 负 delta=基线重置，按本轮 reported 计
+    esac
+    [ "$RBINC" != "unknown" ] && python3 "$HELPER" budget-add "$RBINC" >/dev/null 2>&1 || true
+  fi
   RT=$(mktemp)
-  printf '{"type":"recovered-turn","turn_id":"%s","sid":"%s","tokens_in":"%s","tokens_out":"%s","ts":"%s"}\n' \
-    "$TURN_ID" "${NEW_SID:-none}" "$U_IN" "$U_OUT" "$(date -u +%FT%TZ)" > "$RT"
+  if [ -n "$U_CUM" ]; then
+    printf '{"type":"recovered-turn","turn_id":"%s","sid":"%s","tokens_in":"%s","tokens_out":"%s","codex_cum":%s,"cost_usd_delta":"%s","ts":"%s"}\n' \
+      "$TURN_ID" "${NEW_SID:-none}" "$U_IN" "$U_OUT" "$U_CUM" "$REC_COST_DELTA" "$(date -u +%FT%TZ)" > "$RT"
+  else
+    printf '{"type":"recovered-turn","turn_id":"%s","sid":"%s","tokens_in":"%s","tokens_out":"%s","cost_usd_delta":"%s","ts":"%s"}\n' \
+      "$TURN_ID" "${NEW_SID:-none}" "$U_IN" "$U_OUT" "$REC_COST_DELTA" "$(date -u +%FT%TZ)" > "$RT"
+  fi
   helper ledger-append < "$RT" || true; rm -f "$RT"
   append_engine_logs
   CAMPAIGN_STATE="" ; MEASURE_STATE="" ; ROOT_STATUS=""
@@ -1229,7 +1409,9 @@ print(json.dumps(obj, ensure_ascii=False))
 PYTURN
 helper ledger-append < "$TURN_F" || true; rm -f "$TURN_F"
 
-# F2：金额总账累计（单一权威 budget 区；负 delta=基线重置按 reported 计；unknown 不加）
+# F2/R1：金额累计（负 delta=基线重置按 reported 计；unknown 不加）。
+# 单位分账在 helper 内完成：unit=usd → budget.used/remaining（有门）；
+# 非 usd → total.cost_usd_total 纯统计（无门）。GPU hours 永不经此路径。
 if [ "$COST_DELTA" != "unknown" ]; then
   BINC="$COST_DELTA"
   case "$(python3 -c "import sys; sys.exit(0 if float(sys.argv[1]) < 0 else 1)" "$COST_DELTA" 2>/dev/null; echo $?)" in

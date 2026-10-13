@@ -155,6 +155,24 @@ Claude Code 通过原生 Agent 协作与**会话内心跳**推进长任务。会
 
 Claude Code uses native agents and **in-session heartbeats** for longer work. After a session ends, open a new one on the same project: Orchestrator reads the saved state and findings before continuing. See the [persistent-execution conventions](skills/research-orchestrator/SKILL.md#持久运行).
 
+无人值守的长战役可用常驻控制器推进（`skills/research-orchestrator/templates/lemvo-run.sh`，控制器零模型调用；单 owner 原子锁防双开；每轮先对账——活作业等待、未结算轮恢复、已结束结果以回执注入分析，不重跑实验）：
+
+For unattended long campaigns, use the resident controller (`skills/research-orchestrator/templates/lemvo-run.sh`): a zero-model-call scheduler with a single-owner lock that reconciles first every turn — running jobs wait, unsettled turns recover, and finished results return as receipts:
+
+```bash
+RUN="$HOME/.claude/skills/research-orchestrator/templates/lemvo-run.sh"
+
+bash "$RUN" start   <project> [--engine codex|claude] [--mode guided|unattended] [--max-turns N]
+bash "$RUN" switch  <project> guided|unattended  # 轮边界生效；切 unattended 且无人持锁时自动拉起 / takes effect at turn boundaries
+bash "$RUN" advance <project> [steer文件]        # 控制器活跃=提交推进请求，不并行开第二套循环 / hands the request to the single owner
+bash "$RUN" steer   <project> <消息文件>          # 指导入不可变队列（原子发布） / immutable steer queue, atomic publish
+bash "$RUN" status  <project>                    # 模式/引擎/owner/作业/回执一览 / modes, owner, jobs, receipts
+```
+
+`guided` 常驻等人（`advance` 唤醒），`unattended` 自动推进、预算决策点停下待人；会话中毒/空转时 `bash "$RUN" purge <project>` 归档会话与轮证据后干净重启（STATE 与预算保留）。
+
+`guided` idles for a human (`advance` wakes it); `unattended` keeps going and stops at budget decision points. If a session goes stale, `bash "$RUN" purge <project>` archives the session evidence for a clean restart (state and budget are kept).
+
 <sub>感谢开源仓库 / Thanks to [autoresearch](https://github.com/karpathy/autoresearch), [Feynman](https://github.com/Companion-Inc/feynman), and [AI Research Skills](https://github.com/Orchestra-Research/AI-Research-SKILLs). 各组件许可见原始文件与仓库 / Component licenses remain in their source files and repositories.</sub>
 
 ## 安装说明 / Install Notes

@@ -43,12 +43,17 @@ quality control, not corner-cutting.
 ## 3. Capability self-assessment rubric
 
 Ask the user (or infer from their input) the following four inputs.
-Record each on the scale shown.
+Record each on the scale shown. **These are estimation defaults, not
+standards** (r29 A8): when the task contract or the user states actual
+resources, schedule, or compute, use those task-specific numbers in
+place of the bands below.
 
 ### 3.1 Weekly effective hours
 
 Effective hours mean focused, deep-work hours without meetings or
-context switches. A rough calibration:
+context switches. Use the user's actual available time when known; the
+bands below are only a fallback calibration for scheduling-risk
+estimates (a planning signal, never a validity verdict):
 
 - Under 10 hours per week: top-venue publication is unlikely within a
   typical idea lifecycle unless execution is exceptional.
@@ -83,15 +88,20 @@ drives sustainability over the lifecycle.
 
 ### 3.4 Infrastructure access
 
-Binary flags:
+Record the compute/data access the **task actually requires** and what
+the student actually has (r29 A8: no universal "four A100s" bar — a
+probe-scale task and a frontier-scale task have different real
+requirements):
 
-- Access to at least four large GPUs (A100 or equivalent): yes or no.
-- Access to proprietary data or annotation budget: yes or no.
+- Compute class required vs available (e.g. "needs multi-GPU
+  multi-day runs": yes or no).
+- Access to proprietary data or annotation budget, if the task needs
+  it: yes or no.
 - Advisor or team weekly review cadence: yes or no.
 
 Infrastructure access shortens lifecycle fit for certain categories
-(large-GPU access is often required for data-intensive and
-application research at the frontier).
+(task-dependently — record the task's real requirement, not a generic
+frontier-lab setup).
 
 ## 4. Matching logic
 
@@ -112,11 +122,16 @@ Given a proposed idea and a capability profile:
 ### Detection flags
 
 - **Lifecycle-short mismatch**: realistic execution exceeds 1.3x the
-  lifecycle midpoint. High risk.
+  lifecycle midpoint. High scheduling risk — route to scope reduction,
+  resourcing options, or outer-loop plan revision; it is a planning
+  estimate, not a veto (r29 A8).
 - **Capability-depth mismatch**: the category demands a skill at level
-  4 or 5 that the student rates at 2 or below. Medium-to-high risk.
-- **Infrastructure mismatch**: the category requires GPU or data
-  access the student lacks. High risk.
+  4 or 5 that the student rates at 2 or below. Medium-to-high planning
+  risk — mitigable via pairing, tooling, or scope choice.
+- **Infrastructure mismatch**: the task's real compute/data requirement
+  is unmet. High planning risk — resolve by rescaling the task or
+  acquiring access; counts as rejection only when unsolvable within
+  budget (see fatal-flaws F5).
 - **Preference mismatch**: the category conflicts with the student's
   theoretical-applied preference. Medium risk; watch for drop-off.
 

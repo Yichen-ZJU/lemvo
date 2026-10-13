@@ -48,20 +48,26 @@ LOCK_GRACE="${LEMVO_LOCK_GRACE:-60}"
 say() { echo "[$(date +%F\ %H:%M:%S)] $*"; }
 log() { say "$*" >> "$RUNLOG" 2>/dev/null; say "$*"; }
 CTL_LAST=""
-set_status() {  # $1=状态 $2=细节；控制动作映射进 .lemvo-control.jsonl
-  echo "${1:-}|${2:-}|turn=$(cat .lemvo-turn-count 2>/dev/null || echo 0)|$(date -u +%FT%TZ)" > "$STATUS_F"
+set_status() {  # $1=状态[|细节]（或 $1=状态 $2=细节）；中央解析 state|detail——
+                # R5：调用方单参 "RUNNING|turn-1" 与双参 "RUNNING" turn-1 等价，
+                # 控制日志记录准确的 state/action 对，不把正常态记成 runtime_error
+  local raw="${1:-}" st det
+  st="${raw%%|*}"; det=""
+  case "$raw" in *\|*) det="${raw#*|}";; esac
+  [ -n "${2:-}" ] && det="$2"
+  echo "${st}|${det}|turn=$(cat .lemvo-turn-count 2>/dev/null || echo 0)|$(date -u +%FT%TZ)" > "$STATUS_F"
   local act
-  case "${1:-}" in
+  case "$st" in
     RUNNING) act=continue;;
     WAITING_JOB) act=waiting_jobs;;
     WAITING_USER|BLOCKED) act=needs_user;;
     COMPLETED) act=completed;;
     *) act=runtime_error;;
   esac
-  if [ "${1:-}${2:-}" != "$CTL_LAST" ]; then
-    CTL_LAST="${1:-}${2:-}"
+  if [ "${st}${det}" != "$CTL_LAST" ]; then
+    CTL_LAST="${st}${det}"
     printf '{"ts":"%s","state":"%s","detail":"%s","action":"%s","turn":%s}\n' \
-      "$(date -u +%FT%TZ)" "${1:-}" "${2:-}" "$act" "$(cat .lemvo-turn-count 2>/dev/null || echo 0)" >> "$CONTROL_LOG" 2>/dev/null
+      "$(date -u +%FT%TZ)" "$st" "$det" "$act" "$(cat .lemvo-turn-count 2>/dev/null || echo 0)" >> "$CONTROL_LOG" 2>/dev/null
   fi
 }
 
@@ -216,8 +222,9 @@ for j in jobs:
     d = {"run_id": rid, "pid": j.get("pid"), "done_file": df, "external": ext}
     st = None
     if df and os.path.exists(df) and os.path.getsize(df) > 0:
+        raw_txt = open(df, encoding="utf-8", errors="replace").read(262144)
         try:
-            rj = json.loads(open(df, encoding="utf-8", errors="replace").read(262144))
+            rj = json.loads(raw_txt)
         except Exception:
             rj = None
         if isinstance(rj, dict):           # result JSON：严格按 run_id/status/exit_code
@@ -236,7 +243,20 @@ for j in jobs:
             if isinstance(rj.get("metrics"), dict):
                 d["metrics"] = rj["metrics"]        # runner 回执：指标/计时随结果保留
             d["result"] = dict((k, rj.get(k)) for k in ("run_id", "status", "exit_code") if rj.get(k) is not None)
-        else:                              # 非 JSON 哨兵文件：向后兼容视为完成
+        elif raw_txt.lstrip()[:1] in ("{", "["):
+            # R2：预期 JSON 但截断/损坏 ≠ 旧式哨兵。生产者核验存活 → 继续等待；
+            # 已结束/无法核验 → 非成功终态（不提前唤醒下游分析）
+            if j.get("pid") and not ext:
+                try:
+                    os.kill(int(j["pid"]), 0)
+                    st = "running"
+                except ProcessLookupError:
+                    st = "failed"; d["result"] = {"corrupt_result": df}
+                except (ValueError, PermissionError):
+                    st = "running"
+            else:
+                st = "unknown"; d["result"] = {"corrupt_result": df}
+        else:                              # 旧式哨兵（非 JSON 文本）：显式兼容视为完成
             st = "succeeded"; d["result"] = {"sentinel": "non-json"}
     if st is None:
         if j.get("pid") and not ext:
