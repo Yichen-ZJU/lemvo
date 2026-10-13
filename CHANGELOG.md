@@ -97,3 +97,8 @@ GPT grounded-ideation 计划指出的七处与 round-24 探索/确认分层、�
 
 用户要求的两种运行模式落地：启动选一次写入项目根 `.lemvo-mode`（单一来源），guided=阶段交接点汇报等确认、unattended=授权内自主推进仅授权缺口集中请求；中途切换改同一文件不重开课题，共享状态/结果/预算。主控+constraint-governance 对齐。评审收尾：brainstorming/creative 清无条件"询问研究者/研究者最终选择"改双模式分支；10-20 想法/3 实验/2 周 pilot 改可选建议按任务缩放；六引用改 `../shared-references/` 安装相对（探针加 G5 安装布局）；同域机制够用即可结束检索；预测量级可 unknown 不编数字；"不得改"限当前版本既有实验；30.7% 勘误为 30.7 个百分点（提案级 In-domain novelty）。盲测夹具入仓（tests/blindtest_cases.json + 3 来源夹具 + rubric + fixture 自检 + BLINDTEST.md，挂 run_tests.sh，无模型）。验收：探针 0/34、fm_lint 115/0、全仓测试套件过。四仓推送（b8cbfc5/a12f414/771a79e/263a3d5）。盲测 RUN 与双 CLI 闭环待批预算；140.30 live 未部署（不声称已改 live 行为）。
 
+
+## 2026-10-13 启动模式接线修复（r28，评审 P1 闭环）
+
+独立评审复现的确定缺口已修：lemvo-run.sh start 原无条件 `echo unattended > .lemvo-mode` 覆盖已选 guided（启动与重启均如此）。现支持 `--mode guided|unattended`（显式指定优先），未指定时**保留已有合法值不覆盖**，无合法值才默认 unattended；无效 --mode 忽略并记日志。启动/重启都保留选择，switch 与运行中切换不变。盲测夹具补模式覆盖（12→14 案，加 guided 交接 + 中途切换案）+ 全案授权字段 + source_refs 校验（修真自检空操作），BLINDTEST.md 补写 .lemvo-mode 步骤。回归：probe-mode-start-r28 8/8、probe-v9 26/26、fm_lint 115/115/178/181 零缺陷、四仓 run_tests.sh 过。四仓推送（7f85334/0afc578/6ece6ac/c2e28e4）。盲测 RUN + 双 CLI 闭环待批预算；live 未部署。
+
