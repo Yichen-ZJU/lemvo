@@ -128,11 +128,11 @@ Batch 3：四仓 README 补常驻控制器入口（start --mode / switch / advan
 
 **P1-3 原生 Arbor**：prune_node 调度态语义同步 native（未测后代保持 pending、done/merged 保留 status+score、running 剪除）；constraints 视图去除 "these directions FAILED"，分 tested/untested 两栏（untested 明示 no re-proposal ban）。dev-only 真正接入调用处：native session_ops/MCP server/coordinator GitMergeBranchTool 三处 accept_dev；不跑不碰封存 test、不伪写 test_trunk_score、commit 标注 dev-only；fallback 先判 accept-dev 再决定是否跑 test 命令；merge-eval 技能与 coordinator prompts 接线。test 基线改进门仅 test basis。
 
-**P1-4 AutoScientists**：队列写入行同持久化 scientific_classification（发布前确定；σ 未知时小幅负默认 NEAR-MISS 不制造 DISCARD；FAILED 不算否证）；Step 9 改判必须版本化更新已持久化记录；analyst 家族计数优先读 scientific_classification（legacy 回落）；清除"skip this mechanism family"与"3+ DISCARD 不得提同族变体"禁令（降权≠禁令，真实负结果保留）；HEARTBEAT 恢复段同口径。三种子聚合纳入 third_seed_metric（全种子均值，best 仅展示）。
+**P1-4 团队路线分类闭合**：队列写入行同持久化 scientific_classification（发布前确定；σ 未知时小幅负默认 NEAR-MISS 不制造 DISCARD；FAILED 不算否证）；Step 9 改判必须版本化更新已持久化记录；analyst 家族计数优先读 scientific_classification（legacy 回落）；清除"skip this mechanism family"与"3+ DISCARD 不得提同族变体"禁令（降权≠禁令，真实负结果保留）；HEARTBEAT 恢复段同口径。三种子聚合纳入 third_seed_metric（全种子均值，best 仅展示）。
 
 **运行时**：max-turns 终态 COMPLETED→PAUSED（运行器暂停≠课题完成；无产物绝不记完成；控制动作新增 paused）。Codex 失败分类按结构化终止事件（turn.failed/result error 消息），全日志 grep 降级兜底——非致命配置警告不再遮蔽真正终止原因（试点实录 routing discovery timeout 由误判 CONFIG_INVALID 修正为 SERVICE）。
 
-**文档**：public README start 示例 --engine 显式（默认 codex 注明）；pro README 删除 install.sh 自动装 AutoScientists 假声称、launcher --help 不构成依赖实证、打印 runbook≠已执行；constraint-governance GPU 条款按费用政策改写；fatal-flaws F4 按贡献类型判断受益。
+**文档**：public README start 示例 --engine 显式（默认 codex 注明）；pro README 删除 install.sh 自动装团队组件的假声称、launcher --help 不构成依赖实证、打印 runbook≠已执行；constraint-governance GPU 条款按费用政策改写；fatal-flaws F4 按贡献类型判断受益。
 
 **试点口径更正**：claude 试点不通过（10 项权限拒绝、STATE/artifact 未生成、campaign_log 是适配器追加）；max-turns=COMPLETED≠课题完成；codex 真正终止是 routing discovery timeout。详见交付目录 PILOT_ERRATA.md。
 
