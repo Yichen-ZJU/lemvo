@@ -119,3 +119,21 @@ Batch 3：四仓 README 补常驻控制器入口（start --mode / switch / advan
 ## 2026-10-13 r29-fix 补记：真实双 CLI 小预算闭环
 
 单轮冒烟（/tmp/r29-loop；证据 results/dual-cli-loop/）。claude 线真实闭环通过：start → 真实引擎轮 → 计量结算 → max-turns COMPLETED；账本实收 tokens 59457/15523、cache_read 642368、cost_usd_delta=2.0131（first-reported，client-estimate）、wall 404s、SID 冷启动取得；模型写 campaign_log.txt 未写 STATE.md，artifact_ref=none 如实入账（prep 计数如实记 0）。codex 线诚实记录阻断：本机 chatgpt.com 不可达（engine-stderr 连续请求超时），引擎分类 CONFIG_INVALID rc64（预检同时报告本机 codex config 键落在 TOML 节内的既有警告），退避重试 3 次后控制器转 BLOCKED|engine-fails（needs_user），SID 未弃、无假账。live 未部署不变（由 ZCode 通道执行）。
+
+## 2026-10-13 r29-fix2：验收报告 P1 收尾 + 费用默认只统计（用户决定 2026-10-14）
+
+**费用政策（最高优先）**：USD 费用默认只统计、不停止、不缩实验、不否定方向；金额停止门仅当 budget.cap_authorized: yes（真实用户明确授权、cap_source 出处可核对）时存在。模型自拟宪章/模板默认/历史孤立数值 ≠ 授权；total_cap:null/未设/来源不可考 = 只统计，不逐轮追问补授权。GPU 小时维持纯统计；token/累计墙钟不得替代金额门成为默认限制。恢复重复计费修复（recovered-turn 携带 cost_usd_reported 参与后续差分，序列 1→3→4 由记 6 修正为 4）；迁移行尾注释感知 + 误标项目幂等回填 + 迁移显式标 cap_authorized: no。
+
+**P1-2 评分器**：JSON 主键阶梯全量 + 日志真实顺序统一取最终值（loss/val_bpb/f1 不再丢失、文本最终值不再被早期 JSON 遮蔽）；blob 级污染规则（同读数内任一主键 bool/NaN/Inf/溢出 → 整读数作废），坏 eval 永不写 baseline/trunk 不退化。
+
+**P1-3 原生 Arbor**：prune_node 调度态语义同步 native（未测后代保持 pending、done/merged 保留 status+score、running 剪除）；constraints 视图去除 "these directions FAILED"，分 tested/untested 两栏（untested 明示 no re-proposal ban）。dev-only 真正接入调用处：native session_ops/MCP server/coordinator GitMergeBranchTool 三处 accept_dev；不跑不碰封存 test、不伪写 test_trunk_score、commit 标注 dev-only；fallback 先判 accept-dev 再决定是否跑 test 命令；merge-eval 技能与 coordinator prompts 接线。test 基线改进门仅 test basis。
+
+**P1-4 AutoScientists**：队列写入行同持久化 scientific_classification（发布前确定；σ 未知时小幅负默认 NEAR-MISS 不制造 DISCARD；FAILED 不算否证）；Step 9 改判必须版本化更新已持久化记录；analyst 家族计数优先读 scientific_classification（legacy 回落）；清除"skip this mechanism family"与"3+ DISCARD 不得提同族变体"禁令（降权≠禁令，真实负结果保留）；HEARTBEAT 恢复段同口径。三种子聚合纳入 third_seed_metric（全种子均值，best 仅展示）。
+
+**运行时**：max-turns 终态 COMPLETED→PAUSED（运行器暂停≠课题完成；无产物绝不记完成；控制动作新增 paused）。Codex 失败分类按结构化终止事件（turn.failed/result error 消息），全日志 grep 降级兜底——非致命配置警告不再遮蔽真正终止原因（试点实录 routing discovery timeout 由误判 CONFIG_INVALID 修正为 SERVICE）。
+
+**文档**：public README start 示例 --engine 显式（默认 codex 注明）；pro README 删除 install.sh 自动装 AutoScientists 假声称、launcher --help 不构成依赖实证、打印 runbook≠已执行；constraint-governance GPU 条款按费用政策改写；fatal-flaws F4 按贡献类型判断受益。
+
+**试点口径更正**：claude 试点不通过（10 项权限拒绝、STATE/artifact 未生成、campaign_log 是适配器追加）；max-turns=COMPLETED≠课题完成；codex 真正终止是 routing discovery timeout。详见交付目录 PILOT_ERRATA.md。
+
+回归：probe-r29fix 39/39×4 仓（含 3 项费用政策断言）；审查方 decision 探针 23/24（1 项为探针预修复期望残留，规格已对齐）；B2 28/28；四仓 run_tests 全过；arbor pytest 排除预存缺资产后 0 failed（剪枝旧语义测试改写为新语义）；分类器真实 JSONL 重放 + 4 合成形态；入口 start/advance/status 实测。交付 /home/yyc/outputs/lemvo-r29fix2-20261013/。live 未部署（ZCode 通道；部署时需同步说明 cap_authorized 语义）。结果驱动真实双 CLI 链路待权限窄授权后重跑。
