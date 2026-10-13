@@ -92,3 +92,8 @@ GPT grounded-ideation 计划指出的七处与 round-24 探索/确认分层、�
 ## 2026-10-12 grounded-ideation 共享接口（IdeaScientist 借鉴，无新 skill）
 
 新增 skills/shared-references/grounded-ideation.md（共享参考件非 skill，公开技能数仍 115）：gap→跨域机制→提案三段链（arXiv:2610.04074 消融量化依据 + r26 机制契合优先修正）、候选卡 13 字段（新增 falsifiable_prediction/refutation_condition 必填，交接工具非许可门，准入仍 READY_TO_PROBE）、结果回流七条。六主技能短链接按需触发。结构探针 28/28，fm_lint 0 缺陷，四仓推送核验（f54373f/44220e4/a5014d1/c76bacc）。盲测与真实双 CLI 闭环未跑，待批准。
+
+## 2026-10-13 双运行模式统一 + grounded-ideation 评审收尾（r27）
+
+用户要求的两种运行模式落地：启动选一次写入项目根 `.lemvo-mode`（单一来源），guided=阶段交接点汇报等确认、unattended=授权内自主推进仅授权缺口集中请求；中途切换改同一文件不重开课题，共享状态/结果/预算。主控+constraint-governance 对齐。评审收尾：brainstorming/creative 清无条件"询问研究者/研究者最终选择"改双模式分支；10-20 想法/3 实验/2 周 pilot 改可选建议按任务缩放；六引用改 `../shared-references/` 安装相对（探针加 G5 安装布局）；同域机制够用即可结束检索；预测量级可 unknown 不编数字；"不得改"限当前版本既有实验；30.7% 勘误为 30.7 个百分点（提案级 In-domain novelty）。盲测夹具入仓（tests/blindtest_cases.json + 3 来源夹具 + rubric + fixture 自检 + BLINDTEST.md，挂 run_tests.sh，无模型）。验收：探针 0/34、fm_lint 115/0、全仓测试套件过。四仓推送（b8cbfc5/a12f414/771a79e/263a3d5）。盲测 RUN 与双 CLI 闭环待批预算；140.30 live 未部署（不声称已改 live 行为）。
+
