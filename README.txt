@@ -46,7 +46,7 @@ Repository snapshot checked 2026-10-14
   Count convention: <engine>/skills/<directory>/SKILL.md; not agents or nested references.
 
 Language
-  Defaults to Chinese. The switch remembers the choice in this browser.
+  Defaults to English on first visit. The switch remembers the choice in this browser.
   ?lang=en or ?lang=zh overrides it when opening the page.
   This is one bilingual page, not separate language URLs for search indexing.
 
