@@ -1,5 +1,12 @@
 # CHANGELOG — claude-for-research
 
+## 2026-10-14 Runtime recovery and policy consistency
+
+- Preserve cumulative model costs across recovered turns, including old string snapshots; missing authorization sources do not activate a monetary limit. GPU usage remains statistics only.
+- Generate the accounting helper version from one source and migrate existing 4.8 helpers once to 4.9; handle NUL-containing process identities explicitly.
+- Judge baselines by the task and contribution rather than publication year; keep exploration separate from paper-level comparisons.
+- Add isolated CPU adapter regression tests to the standard test command. Source validation does not imply live deployment or a real-model research-loop acceptance.
+
 ## v2.1-research-pipeline（2026-09-27）
 
 - deep-research 防绕过：调研任务强制 Skill 管线（SKILL.md 触发纪律 + CLAUDE.md 硬约定）；deep-2 验证的强化模式固化（.plans 分工、verifier→reviewer、承重声明 MCP 亲核、逐候选占位检索、工具统计入 provenance）。

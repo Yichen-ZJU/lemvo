@@ -53,8 +53,11 @@ strong; a theory contribution submitted to VLDB meets the same fate.
 
 ### F3: Baseline is not the real baseline
 
-The chosen baseline is weak or outdated. Beating a 2023 baseline in
-2026 convinces no one; reviewers demand the current year's SOTA.
+The chosen baseline does not support the comparison the paper claims.
+Use strong, relevant and reproducible baselines for the task and contribution;
+publication year alone is not a validity test. During exploration, a working
+baseline is sufficient to test the proposed change; broader comparisons belong
+to the paper's eventual claims, not a prerequisite for building the method.
 
 ### F4: No compelling motivation
 

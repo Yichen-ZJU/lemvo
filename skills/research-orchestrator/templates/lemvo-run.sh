@@ -89,7 +89,7 @@ owner_alive() {  # 0=存活 1=已死/无锁（可接管） 2=初始化中/身份
   case "$pid" in ''|*[!0-9]*) return 2;; esac   # 缺/坏 PID：不判死 owner（C1）
   [ "$pid" -gt 0 ] || return 2
   kill -0 "$pid" 2>/dev/null || return 1
-  grep -q "lemvo-run" "/proc/$pid/cmdline" 2>/dev/null || return 1
+  grep -aq "lemvo-run" "/proc/$pid/cmdline" 2>/dev/null || return 1   # -a：/proc cmdline 含 NUL，ugrep/部分 grep 缺 -a 时全判不匹配
   st=$(cat "$LOCKD/starttime" 2>/dev/null || true)   # PID 复用防护
   if [ -n "$st" ] && [ "$st" != "$(pid_start "$pid")" ]; then return 1; fi
   return 0
@@ -133,7 +133,7 @@ engine_pid_alive() {
   [ -n "$st" ] || return 1   # 旧格式（裸 PID）无身份——不认，防误伤他项目进程
   kill -0 "$pid" 2>/dev/null || return 1
   [ "$(pid_start "$pid" 2>/dev/null)" = "$st" ] || return 1
-  grep -qE "codex|claude" "/proc/$pid/cmdline" 2>/dev/null
+  grep -aqE "codex|claude" "/proc/$pid/cmdline" 2>/dev/null   # -a：同 owner_alive，NUL cmdline 在 ugrep 下无 -a 不匹配
 }
 turn_inflight() {  # .autoloop-turn-active = turn_id|adapter_pid|adapter_start
   local tid apid ast

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 参考外层循环脚本 v4.8（round-29-fix2：费用政策 + 恢复计费 + 迁移修正）
+# 参考外层循环脚本 v4.9（round-29-fix3：恢复结算 + 授权来源 + 助手迁移）
 #  v4.8 变更（对 v4.7，均带隔离回归）：
 #  费用政策（用户决定 2026-10-14）：USD 费用默认只统计、不停止、不缩实验、
 #    不否定方向；金额停止门仅当 budget.cap_authorized: yes（真实用户明确授权、
@@ -65,7 +65,9 @@
 #  引擎身份在 cd 后读取、双引擎适配、结构化 rc6/7 映射。
 # 红线：替换活体战役脚本前先备份；对在跑进程只观察不杀。
 set -uo pipefail
-HELPER_VERSION="4.7"
+# One version source: write_helper emits this marker into the generated Python.
+# Bump on helper changes so existing project-local helpers migrate exactly once.
+HELPER_VERSION="4.9"
 
 # ── --init 模式 ──
 if [ "${1:-}" = "--init" ]; then
@@ -157,12 +159,11 @@ python3 -c "import sys; v=float(sys.argv[1]); sys.exit(0 if v>=0 else 1)" "$PREP
 
 # ── 助手版本管理（S2）──
 write_helper() {
-  cat > "$HELPER" <<'PYEOF'
-#!/usr/bin/env python3
-"""autoloop v4.8 助手（HELPER_VERSION 4.8）。py3.6 兼容，标准库 only。"""
-import fnmatch, hashlib, json, os, re, sys
+  printf '#!/usr/bin/env python3\nHELPER_VERSION = "%s"\n' "$HELPER_VERSION" > "$HELPER"
+  cat >> "$HELPER" <<'PYEOF'
+"""autoloop accounting helper. Python 3.6 compatible; standard library only."""
+import fnmatch, hashlib, json, math, os, re, sys
 
-HELPER_VERSION = "4.8"
 STATE = "research-state.yaml"
 BLOCKING = {"HOLD", "STOPPED", "PAUSED", "EVIDENCE_HOLD", "STOPPED_INCONCLUSIVE",
             "BLOCKED", "BLOCKED_USER"}
@@ -285,15 +286,20 @@ def num_or_none(v):
         return None
 
 def cmd_budget_gate():
-    """r29-fix2 费用政策（用户决定 2026-10-14）：USD 费用默认只统计、不停止——
-    仅当 budget.cap_authorized: yes（真实用户明确授权、cap_source 出处可核对）
-    时金额门才生效。模型自拟宪章/模板默认值/历史孤立数值 ≠ 授权；
-    total_cap: null / 未设上限 / 授权来源不可考 = 只统计，不拦研究，也不逐轮
+    """r29-fix2/fix3 费用政策（用户决定 2026-10-14）：USD 费用默认只统计、
+    不停止——金额门仅当授权可核对时生效，双条件缺一不可：
+      (a) budget.cap_authorized: yes
+      (b) budget.cap_source 非空且非占位（unknown/none/null/-/n/a 视为来源
+          缺失）——只给模型可自行置 yes 的标签不视作用户授权；出处可核对
+          才启用对应金额停止条件。
+    total_cap:null / 未设上限 / 任一条件不满足 = 只统计，不拦研究，也不逐轮
     追问"补授权"。未知值不视为耗尽，也不视为无限授权。GPU 小时与本门无关
     （纯统计，见 gpu_usage 区）；token/墙钟阈值不得替代本门成为默认限制。"""
     b = read_budget()
     cap, used = num_or_none(b["total_cap"]), num_or_none(b["used"])
-    authorized = (b["cap_authorized"] or "").strip().lower() == "yes"
+    src = (b["cap_source"] or "").strip().lower()
+    provenance_ok = src not in ("", "unknown", "none", "null", "-", "n/a")
+    authorized = (b["cap_authorized"] or "").strip().lower() == "yes" and provenance_ok
     exhausted = "unknown"
     if b["unit"] == "usd" and authorized and cap is not None and used is not None:
         exhausted = "yes" if used >= cap else "no"
@@ -301,6 +307,7 @@ def cmd_budget_gate():
     print("BUDGET_CAP=" + str(b["total_cap"]))
     print("BUDGET_USED=" + str(b["used"]))
     print("BUDGET_CAP_AUTH=" + ("yes" if authorized else "no"))
+    print("BUDGET_CAP_SOURCE=" + (b["cap_source"] or ""))
     print("BUDGET_GATE_ACTIVE=" + ("yes" if authorized else "no"))
     print("BUDGET_EXHAUSTED=" + exhausted)
 
@@ -798,10 +805,18 @@ def cmd_cost_delta():
         # r29-fix2 P1-1：恢复事件同样携带 cost_usd_reported（累计快照），
         # 必须参与后续差分——否则恢复轮的金额会被下一正常轮重复计入
         # （序列 1 → 3(恢复) → 4 曾被记成 1+2+3=6，正确应为 4）。
+        # r29-fix3 P1-1：reader 兼容旧字符串快照（writer 曾写 "3"）——
+        # 可解析为有限数则采用，bool/非数拒收；不清零旧账。
         for ev in ledger_events():
             if ev.get("type") in ("work-turn", "prep-turn", "recovered-turn") and ev.get("sid") == sid:
                 v = ev.get("cost_usd_reported")
-                if isinstance(v, (int, float)):
+                if isinstance(v, str):
+                    try:
+                        f = float(v)
+                    except ValueError:
+                        continue
+                    v = f if math.isfinite(f) else None
+                if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(v):
                     prev = v
         if prev is not None:
             print("COST_DELTA=%s" % (rep - prev)); print("COST_BASIS=delta-from-prev")
@@ -875,7 +890,7 @@ PYEOF
 
 if [ ! -f "$HELPER" ]; then
   write_helper
-elif ! grep -q "HELPER_VERSION = \"$HELPER_VERSION\"" "$HELPER" 2>/dev/null; then
+elif ! grep -qFx "HELPER_VERSION = \"$HELPER_VERSION\"" "$HELPER" 2>/dev/null; then
   TS=$(date +%Y%m%d-%H%M%S)
   cp "$HELPER" "$HELPER.legacy-$TS"
   write_helper
@@ -971,14 +986,23 @@ except Exception: print(0)' "$TD" 2>/dev/null || echo 0)
     [ "$RBINC" != "unknown" ] && python3 "$HELPER" budget-add "$RBINC" >/dev/null 2>&1 || true
   fi
   RT=$(mktemp)
-  # r29-fix2 P1-1：恢复事件必须携带 cost_usd_reported（引擎上报的累计值），
-  # 与正常轮同一快照口径，供后续 cost-delta 差分——防止恢复轮金额重复入账。
+  # r29-fix3 P1-1：恢复事件必须携带数值型 cost_usd_reported（与正常轮同口径）。
+  # 旧实现 printf %s 写成字符串 "3"，reader 只认 int/float → 恢复快照被跳过，
+  # 序列 1→3(恢复)→4 的账本仍是 1/3/6。这里按可解析有限数写 JSON number，
+  # 不可解析才写字符串；reader 同时兼容已存在的旧字符串快照（见 cmd_cost_delta）。
+  REC_REP_JSON=$(python3 -c 'import json, math, sys
+v = sys.argv[1]
+try:
+    f = float(v)
+    print(json.dumps(f) if math.isfinite(f) else json.dumps(v))
+except (TypeError, ValueError):
+    print(json.dumps(v))' "$U_COST" 2>/dev/null || echo '"unknown"')
   if [ -n "$U_CUM" ]; then
-    printf '{"type":"recovered-turn","turn_id":"%s","sid":"%s","tokens_in":"%s","tokens_out":"%s","codex_cum":%s,"cost_usd_reported":"%s","cost_usd_delta":"%s","ts":"%s"}\n' \
-      "$TURN_ID" "${NEW_SID:-none}" "$U_IN" "$U_OUT" "$U_CUM" "$U_COST" "$REC_COST_DELTA" "$(date -u +%FT%TZ)" > "$RT"
+    printf '{"type":"recovered-turn","turn_id":"%s","sid":"%s","tokens_in":"%s","tokens_out":"%s","codex_cum":%s,"cost_usd_reported":%s,"cost_usd_delta":"%s","ts":"%s"}\n' \
+      "$TURN_ID" "${NEW_SID:-none}" "$U_IN" "$U_OUT" "$U_CUM" "$REC_REP_JSON" "$REC_COST_DELTA" "$(date -u +%FT%TZ)" > "$RT"
   else
-    printf '{"type":"recovered-turn","turn_id":"%s","sid":"%s","tokens_in":"%s","tokens_out":"%s","cost_usd_reported":"%s","cost_usd_delta":"%s","ts":"%s"}\n' \
-      "$TURN_ID" "${NEW_SID:-none}" "$U_IN" "$U_OUT" "$U_COST" "$REC_COST_DELTA" "$(date -u +%FT%TZ)" > "$RT"
+    printf '{"type":"recovered-turn","turn_id":"%s","sid":"%s","tokens_in":"%s","tokens_out":"%s","cost_usd_reported":%s,"cost_usd_delta":"%s","ts":"%s"}\n' \
+      "$TURN_ID" "${NEW_SID:-none}" "$U_IN" "$U_OUT" "$REC_REP_JSON" "$REC_COST_DELTA" "$(date -u +%FT%TZ)" > "$RT"
   fi
   helper ledger-append < "$RT" || true; rm -f "$RT"
   append_engine_logs
@@ -1135,7 +1159,7 @@ BUDGET_EXHAUSTED=$(printf '%s\n' "$BG" | sed -n 's/^BUDGET_EXHAUSTED=//p')
 BUDGET_USED_NOW=$(printf '%s\n' "$BG" | sed -n 's/^BUDGET_USED=//p')
 BUDGET_CAP_NOW=$(printf '%s\n' "$BG" | sed -n 's/^BUDGET_CAP=//p')
 if [ "$BUDGET_EXHAUSTED" = "yes" ]; then
-  say "已授权金额上限耗尽：budget.used=${BUDGET_USED_NOW} ≥ total_cap=${BUDGET_CAP_NOW}（usd，cap_authorized=yes）——派发前拦截，本轮不调用引擎"
+  say "已授权金额上限耗尽：budget.used=${BUDGET_USED_NOW} ≥ total_cap=${BUDGET_CAP_NOW}（usd，cap_authorized=yes 且 cap_source 可核对）——派发前拦截，本轮不调用引擎"
   emit_reason "OVER_BUDGET"
   cat <<MSG
 金额上限决策选项（任选其一，全部留痕）：
