@@ -334,3 +334,20 @@ GPU hours and model costs are recorded by default. Explicitly authorized caps an
 Original content is released under MIT. Third-party components retain their own licenses; the vendored ARS in `academic-research-suite` (© Cheng-I Wu) is **CC BY-NC 4.0**, for non-commercial use. See the component's license files for details.
 
 <sub>感谢开源仓库 / Thanks to [autoresearch](https://github.com/karpathy/autoresearch), [Feynman](https://github.com/Companion-Inc/feynman), and [AI Research Skills](https://github.com/Orchestra-Research/AI-Research-SKILLs). 更多组件来源见各引擎目录与原始文件 / Further sources are documented in the engine directories and component files.</sub>
+
+## Optional: alphaxiv MCP (enhanced paper discovery)
+
+deep-research uses a layered retrieval backend: the alphaxiv MCP (semantic
+paper discovery / community discussion) when available, with automatic
+degradation to the arxiv MCP (full-text download + search). Full-text reading
+works without alphaxiv.
+
+To enable the enhanced backend:
+
+1. Get a free API key at https://www.alphaxiv.org/
+2. `export ALPHAXIV_API_KEY=<your-key>`
+3. `bash scripts/register-alphaxiv-mcp.sh`
+4. Verify: `claude mcp list` (or `codex mcp list`)
+
+Skipping is safe — the pipeline degrades automatically and records the
+degradation in provenance.
