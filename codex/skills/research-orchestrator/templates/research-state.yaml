@@ -1,0 +1,151 @@
+# Research State — Central Project Tracking
+# Copy this template to your project root and fill in as you go.
+# Updated by the agent after each experiment and reflection.
+
+project:
+  title: ""
+  question: ""                    # The core research question
+  status: active                  # active | paused | concluded
+  started: ""                     # ISO date
+  domain: ""                      # e.g., "mechanistic interpretability", "RL training"
+
+literature:
+  key_papers: []
+  # - id: "liu2025superposition"
+  #   title: "Superposition Yields Robust Neural Scaling"
+  #   authors: "Liu et al."
+  #   year: 2025
+  #   relevance: "Proves ETF structure in LM heads"
+  open_problems: []               # Gaps identified from literature
+  evidence_gaps: []               # What's missing in the field
+
+hypotheses:
+  # List of all hypotheses, active and completed
+  # - id: H1
+  #   statement: "Testable claim with clear prediction"
+  #   status: pending             # pending | active | supported | refuted | inconclusive
+  #   verdict: ""                 # 阴性/排除记录必填标签：IMPLEMENTATION_INVALID |
+  #                               # MEASUREMENT_INCONCLUSIVE | EXPLORATORY_POSITIVE |
+  #                               # EXPLORATORY_NEGATIVE | CONFIRMATION_NOT_ESTABLISHED |
+  #                               # NOVELTY_OVERLAP | UNTESTED（语义见 orchestrator 裁决语义分层）
+  #   scope: ""                   # 该结论限定的对象：配方/预算/指标/条件（整族禁令禁止）
+  #   motivation: "Why this is worth testing"
+  #   parent: null                # null for root, parent ID (e.g., H1) for sub-hypotheses
+  #   priority: medium            # high | medium | low
+
+# 可修订研究计划区（增量区；旧项目缺本节照常运行，不造前置门——
+# 语义见 references/constraint-governance.md）
+research_plan:
+  version: 1                      # 计划版本，每次修订 +1（旧关联不覆盖）
+  stage: exploration              # exploration | confirmation
+  goal_ref: ""                    # 目标来源引用（CHARTER 章节/用户消息）
+  approved_envelope_ref: ""       # 已批准资源边界的来源引用——引用 ≠ 授权；
+                                  # 真实授权以 budget/total 总账与原始用户消息为准
+  constraints: []                 # 会阻塞/限制实验的规则条目；普通描述文字不必录入
+  # - id: local_teacher            # 稳定 ID（换 phase/后端不变）
+  #   kind: design_default         # safety_boundary | approved_resource_cap |
+  #                                # availability_snapshot | design_default |
+  #                                # scientific_assumption | confirmation_lock
+  #   statement: "使用当前可用的本地 checkpoint 作 teacher"
+  #   authority: agent_proposed    # user_explicit | safety_inherent |
+  #                                # approved_envelope | agent_proposed |
+  #                                # inferred | needs_source
+  #   source_ref: ""               # 原文位置；代理转述与用户原话分开记录
+  #   source_status: recorded      # recorded | verified | needs_source
+  #   scope: ""                    # 适用对象（配方/家族/阶段）
+  #   stages: [exploration]
+  #   mutable_by: orchestrator_within_envelope
+  #   reconsider_when: [asset_change, shared_blocker, before_close]
+  #   status: active               # proposed | approved | active | retired
+  last_review:
+    trigger: null                 # 本次复审触发（关闭前/换向/共享阻塞/成本上升/新资产/新配方）
+    decision: null                # 结论（含权限依据）
+    change_ref: null              # research-log 中 change note 的条目号
+  next_constructive_experiment: ""  # 复审必须接到的下一项具体建设
+  active_confirmation_ref: null   # 当前确认合同引用（只锁对应实验与数据）
+
+# 准备循环总账（跨会话/重启/后端累计；重命名 phase/slug 不清零）
+prep:
+  prep_turns: 0                  # 距上次【有信息量观测】的准备轮数——重置须有 artifact 背书（见 last_informative_artifact），纯文字变化不重置
+  prep_wall_time_min: 0.0        # 准备阶段墙钟估计（人工/引擎维护；脚本只维护 total 节）
+  prep_cost: null                # 可取得的 token/费用估计
+  last_informative_observation: ""  # 上次有效进展是什么（何时）——描述性文字
+  last_informative_artifact: none  # 进展凭据文件路径（eval json/带数字的笔记）；settle 用其内容哈希判定真进展
+  last_artifact_sha: none        # 上次结算时凭据文件的 sha256（防 touch/重写无内容变化的伪进展）
+  ready_blocker: ""              # 未就绪的具体阻塞 + 解除条件
+  next_min_probe: ""             # 就绪后的最小真实 probe 描述
+  session_id: null               # 外层循环续接会话 id（按项目持久化）
+
+# 金额预算总账（跨后端连续；换后端不清零——第六轮预算下传机制的落点）
+# r29（R1）：本区只作 USD 金额账——unit=usd 才有派发门与模型费用累计；
+# GPU 小时不是预算单位（见下方 gpu_usage 纯统计区）。历史 gpu_hours 配置
+# 会在首次结算时一次性迁移：旧 used 转记 gpu_usage，cap 保留为注明失效的
+# 历史信息（limit_enforced: no），不清账、不写 0/假上限。
+budget:
+  unit: "usd"                     # 金额单位（模型费用唯一累计口径）
+  total_cap: null                 # 金额上限（usd）；null 表示未设上限
+  cap_authorized: no              # r29-fix2（用户决定 2026-10-14）：金额停止门仅当本字段
+                                  # 为 yes 时存在——须真实用户明确授权且 cap_source 可核对。
+                                  # 模型自拟宪章/模板默认/历史孤立数值 ≠ 授权；no/null =
+                                  # 费用只统计、不停止、不缩实验、不逐轮追问补授权
+  cap_source: ""                  # 授权出处（用户原话/消息位置）；来源不可考不启用门
+  used: 0.0                       # 已消耗金额（跨后端合计；恒记录，与门是否生效无关）
+  remaining: null                 # = total_cap - used；null 表示未设上限
+  limit_enforced: null            # 门只在 cap_authorized: yes 时存在；迁移后的旧非 usd 账标 no
+
+# GPU 小时纯统计（r29 R1 起：只记录报告，不作准入/派发/续跑/晋级/停止限制，
+# 不作为方法评分惩罚；缺测量标 unknown，不猜 0；墙钟见 total 区另记）
+gpu_usage:
+  used_hours: unknown             # 累计 GPU·h（按作业/卡数/型号口径累计）
+  basis: unknown                  # 计量口径（measured | estimated | legacy-budget-migration）
+  source: none                    # 数据来源（runner 回执/作业账/迁移出处）
+  migrated: no                    # 旧 gpu_hours 预算一次性迁移标记
+
+# 外层循环实测总账（autoloop 脚本维护；助手读写本节——与 budget 分开）
+total:
+  total_turns: 0                  # 总轮次（只增不清零）
+  total_wall_time_min: 0.0        # 外层循环实测累计墙钟（分钟，只增不清零）
+  total_cost: null                # 可得费用估计
+  total_tokens_in: 0              # 引擎输入 token 累计（--json usage 事件解析）
+  total_tokens_out: 0             # 引擎输出 token 累计
+  cost_usd_total: unknown         # 非 usd 预算项目下模型费用美元统计（无门、只报告）
+
+# 后端交接日志（每次切换/启动引擎追加一行，不覆盖）
+backend_ledger: []
+# - timestamp: ""
+#   backend: "autoresearch | arbor | forge"
+#   handoff: ""                   # 交接时传入的局部预算与停止标准
+#   local_cap: null
+#   local_used: 0.0
+#   note: ""                      # 例如 "该后端在本环境不可用，跳过"
+
+experiments:
+  proxy_metric: ""                # What we're optimizing and how to compute it
+  # 修复5 KEEP 口径拆分（三处规则统一引用本两字段）：
+  eval_baseline: null             # 成果评估对照 = 预注册冻结的原基线
+                                  # （KEEP/DISCARD 判定用：候选 > eval_baseline 记改进）
+  best_value: null                # 代码保留对照 = 当前最佳实现
+                                  # （分支前进/回滚用：候选 < best_value 不覆盖最佳代码）
+  total_runs: 0
+  trajectory: []
+  # - run_id: "run_001"
+  #   hypothesis: "H1"
+  #   metric_value: null
+  #   delta: null                 # Change from baseline
+  #   wall_time_min: null
+  #   change_summary: ""
+  #   timestamp: ""
+
+outer_loop:
+  cycle: 0                       # How many outer loop reflections so far
+  last_direction: null            # deepen | broaden | pivot | conclude
+  last_reflection: ""             # Brief summary of last reflection decision
+
+workspace:
+  # Track key resource locations
+  findings: "findings.md"
+  log: "research-log.md"
+  literature_dir: "literature/"
+  experiments_dir: "experiments/"
+  to_human_dir: "to_human/"
+  paper_dir: "paper/"
