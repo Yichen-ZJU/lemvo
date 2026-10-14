@@ -20,7 +20,7 @@
 
 **Lemvo connects research reasoning with action.** Understand a question, investigate the literature, build methods, choose experiments, and learn what to do next. Research Orchestrator coordinates **114 research skills** across Claude Code and Codex CLI, carrying ideas into findings and findings into papers.
 
-Start from a research direction, an existing paper and implementation, or unfinished experiments. Lemvo chooses a route from your goal and available assets: literature and ideation, reproduction and improvement, or a standalone autonomous experiment package. Work together at key decisions, or let the resident controller continue within your authorized scope.
+Start from a research direction, an existing paper and implementation, or unfinished experiments. Lemvo chooses a route from your goal and available assets: build a new study from literature and ideas, develop a hypothesis, improve an existing method, or continue saved experiments. Work together at key decisions, or let the resident controller continue within your authorized scope.
 
 ## Core capabilities
 
@@ -79,12 +79,12 @@ Orchestrator chooses the experimental route for the task:
 
 | Starting point | Approach | Typical outputs |
 |---|---|---|
-| An existing model and codebase | Reproduce a baseline and iterate on its methods and training recipe | Baseline, candidate changes, measurements, and improvement records |
+| Research from scratch | Investigate the direction, develop ideas, build methods and evaluation, then advance through autonomous experiments and outer-loop reflection | Literature and candidate ideas, runnable methods, experimental results, and research findings |
 | A question and a hypothesis | Build an implementation, run a small real probe, and revise from observations | Runnable method, diagnostic findings, and next design |
-| A standalone autonomous experiment | **Experiment Forge** builds the package; **Autoresearch** performs the iteration | Fixed evaluation, editable code, run instructions, and experiment ledger |
+| An existing model and codebase | Reproduce a baseline and iterate on its methods and training recipe | Baseline, candidate changes, measurements, and improvement records |
 | Existing experiments and records | Read the original project state and continue the analysis or experiment loop | Continued progress and cumulative resource records |
 
-**Experiment Forge** delivers a Karpathy-style self-running task package: goal, evaluation contract, editable files, dependencies, and run instructions. **Autoresearch** runs the modify → measure → keep/revert inner loop in that package or an existing implementation, improving accuracy, loss, or efficiency while leaving results for the outer loop to interpret.
+Starting from scratch, Lemvo develops a research direction into testable ideas, method implementations, and real experiments. When a self-running task package is useful, **Experiment Forge** turns the idea and experiment design into a Karpathy-style package with a goal, evaluation contract, editable code, dependencies, and run instructions. **Autoresearch** runs the modify → measure → keep/revert inner loop in that package or an existing implementation; the outer loop synthesizes results and revises hypotheses and methods so the research advances with its findings.
 
 Exploratory experiments guide development; confirmatory experiments support paper claims. Measurement and implementation problems are handled where they occur. Negative results retain their tested conditions and scope, useful positive signals remain available for development, and diagnostics connect to concrete method decisions.
 
