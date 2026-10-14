@@ -128,7 +128,7 @@ Both repositories contain **114 skills with the same names**. Research conventio
 <a id="quickstart"></a>
 ## 快速开始 / Quickstart
 
-先安装并登录 Claude Code，再在 Bash 环境中运行： / Install and sign in to Claude Code, then run in Bash:
+先安装并登录 Claude Code，再在 Linux / WSL2 的 Bash 中运行： / Install and sign in to Claude Code, then run in Bash on Linux / WSL2:
 
 ```bash
 git clone https://github.com/Yichen-ZJU/lemvo-for-claude.git
@@ -136,43 +136,70 @@ cd lemvo-for-claude
 ./install.sh
 ```
 
-安装器会备份同名技能、代理与 CLAUDE.md。全文检索需另行配置 ArXiv MCP： / Existing matching skills, agents, and CLAUDE.md are backed up. Configure ArXiv MCP for full-text retrieval:
+安装器会备份同名技能、代理与 CLAUDE.md。全文检索需另行配置 ArXiv MCP（先安装 [uv](https://docs.astral.sh/uv/getting-started/installation/)）： / Existing matching skills, agents, and CLAUDE.md are backed up. Install [uv](https://docs.astral.sh/uv/getting-started/installation/), then configure ArXiv MCP for full-text retrieval:
 
 ```bash
 uv tool install arxiv-mcp-server
 claude mcp add --scope user arxiv -- "$HOME/.local/bin/arxiv-mcp-server"
 ```
 
-开启新会话，给出问题、项目路径和预算： / Start a new session with the question, project path, and budget:
+在你的项目目录里打开 Claude Code，直接说： / Open Claude Code in your project folder and say:
 
-> 用 research-orchestrator 开始研究：问题是……，已有代码与数据在……，可用算力与时间预算是……。请选择合适路线，准备就绪后启动最小真实实验，根据结果改进方法、检验解释，并持续保存研究状态。形成完整贡献后，用共享 Paper Narrative 组织摘要、Introduction、图表与结尾。
+> 我要研究 X 方向。
+>
+> I want to research X.
 
-> Use research-orchestrator to study … . My code and data are in … ; my compute and time budget are … . Choose a route, launch the smallest real experiment when ready, revise the method and test explanations from the results, and preserve research state. When the contribution is ready, use a shared Paper Narrative to connect the abstract, introduction, figures, and conclusion.
+无需记住技能名。Lemvo 会调用 **Research Orchestrator**，梳理目标与可用资源、建立 `research-state.yaml`，再协调内外双循环：内循环构建与验证方法，外循环综合结果并修订下一步。已有项目则读取原状态继续。
 
-### 持续推进 / Keep the project moving
+No skill name to memorize. Lemvo brings in **Research Orchestrator** to clarify the goal and available resources, create `research-state.yaml`, and coordinate two loops: build and test methods inside; interpret results and revise the next step outside. Existing projects resume from saved state.
 
-Claude Code 通过原生 Agent 协作与**会话内心跳**推进长任务。会话结束后，开启新会话并指向原项目，Orchestrator 先读取落盘状态与 findings，再继续研究。心跳的运行方式见[持久运行规范](skills/research-orchestrator/SKILL.md#持久运行)。
+<a id="run-modes"></a>
+### 选择运行模式 / Choose your mode
 
-Claude Code uses native agents and **in-session heartbeats** for longer work. After a session ends, open a new one on the same project: Orchestrator reads the saved state and findings before continuing. See the [persistent-execution conventions](skills/research-orchestrator/SKILL.md#持久运行).
+启动时选择，途中可切换；共享同一份状态、结果与资源记录。
 
-无人值守的长战役可用常驻控制器推进（`skills/research-orchestrator/templates/lemvo-run.sh`，控制器零模型调用；单 owner 原子锁防双开；每轮先对账——活作业等待、未结算轮恢复、已结束结果以回执注入分析，不重跑实验）：
+- **半自动 / Guided**：主要阶段结束后汇报，等你确认或调整方向；已授权的实验批次自主完成。
+- **全自动 / Unattended**：常驻控制器推进调研、构思、实验、分析和修订；等后台实验时不调用模型，无需人工定时发送 continue。
 
-For unattended long campaigns, use the resident controller (`skills/research-orchestrator/templates/lemvo-run.sh`): a zero-model-call scheduler with a single-owner lock that reconciles first every turn — running jobs wait, unsettled turns recover, and finished results return as receipts:
+Choose at the start and switch later without resetting the project. Guided pauses at stage handoffs for your input; unattended uses the resident controller to advance across turns and wait for experiments without model calls.
+
+GPU 小时与模型费用默认用于统计，不是自动停机上限；用户明确设置的限额与资源权限仍然遵守。
+
+GPU hours and model costs are tracked by default, not used as automatic spending caps. Explicit user limits and resource permissions still apply.
+
+<details>
+<summary>跨轮次无人值守与模式切换 / Controller setup and mode switching</summary>
+
+先在交互会话中完成项目初始化（目标、状态、模式及运行权限），结束当前交互执行后，在同一项目目录启动控制器。以下在 Linux / WSL2 上运行；CLI 登录与工具权限需就绪。
+
+Initialize the project interactively first, including its goal, state, mode, and tool permissions. Once the interactive run has stopped, launch the controller from that project folder on Linux / WSL2.
 
 ```bash
 RUN="$HOME/.claude/skills/research-orchestrator/templates/lemvo-run.sh"
 
-bash "$RUN" start   <project> --engine claude|codex [--mode guided|unattended] [--max-turns N]
-                                      # --engine 省略时控制器默认 codex——按所用 CLI 显式指定，勿依赖默认
-bash "$RUN" switch  <project> guided|unattended  # 轮边界生效；切 unattended 且无人持锁时自动拉起 / takes effect at turn boundaries
-bash "$RUN" advance <project> [steer文件]        # 控制器活跃=提交推进请求，不并行开第二套循环 / hands the request to the single owner
-bash "$RUN" steer   <project> <消息文件>          # 指导入不可变队列（原子发布） / immutable steer queue, atomic publish
-bash "$RUN" status  <project>                    # 模式/引擎/owner/作业/回执一览 / modes, owner, jobs, receipts
+# 保留初始化时选择的模式 / Preserve the mode chosen during setup
+nohup bash "$RUN" start "$PWD" --engine claude > lemvo-controller.log 2>&1 &
+bash "$RUN" status "$PWD"
+
+# 切换到半自动或全自动 / Switch to guided or unattended
+bash "$RUN" switch "$PWD" guided
+# bash "$RUN" switch "$PWD" unattended
+
+# 半自动模式推进下一轮 / Advance one guided turn
+# bash "$RUN" advance "$PWD"
 ```
 
-`guided` 常驻等人（`advance` 唤醒），`unattended` 自动推进、预算决策点停下待人；会话中毒/空转时 `bash "$RUN" purge <project>` 归档会话与轮证据后干净重启（STATE 与预算保留）。
+切换在安全交接点生效，不中断在跑训练。`guided` 的控制器常驻等你，`unattended` 自动派发下一轮；后台等待由普通程序承担。指导文件可通过 `bash "$RUN" steer "$PWD" /path/to/message.md` 入队。
 
-`guided` idles for a human (`advance` wakes it); `unattended` keeps going and stops at budget decision points. If a session goes stale, `bash "$RUN" purge <project>` archives the session evidence for a clean restart (state and budget are kept).
+Switches take effect at safe handoffs without interrupting running training. Guided keeps the controller waiting for your input; unattended dispatches the next turn. Queue guidance with `bash "$RUN" steer "$PWD" /path/to/message.md`.
+
+普通交互会话不会因为选择全自动就自行变成常驻进程；跨轮次连续推进由上述控制器负责。它会在明确阻塞、准备停滞决策点、已授权的上限或运行轮数上限处暂停并保留状态，`status` 可查看原因。常驻控制器与交互会话不要同时执行同一个项目。
+
+Selecting unattended mode does not itself launch a resident process. The controller above handles cross-turn continuation. It preserves state and pauses on explicit blockers, preparation-stall decisions, authorized limits, or its runner turn limit; inspect the reason with `status`. Do not run interactive execution and the controller concurrently on the same project.
+
+[运行契约 / Runtime contract](skills/research-orchestrator/SKILL.md#运行模式与作业契约lemvo-run-双模式required) · [控制器源码 / Controller source](skills/research-orchestrator/templates/lemvo-run.sh)
+
+</details>
 
 <sub>感谢开源仓库 / Thanks to [autoresearch](https://github.com/karpathy/autoresearch), [Feynman](https://github.com/Companion-Inc/feynman), and [AI Research Skills](https://github.com/Orchestra-Research/AI-Research-SKILLs). 各组件许可见原始文件与仓库 / Component licenses remain in their source files and repositories.</sub>
 
