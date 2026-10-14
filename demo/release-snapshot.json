@@ -1,12 +1,12 @@
 {
-  "checkedAt": "2026-10-08",
-  "method": "Current public repository HEAD tracked skills/*/SKILL.md lists compared; 115 each, identical sorted paths SHA256 c83f62134202eccbce45a065ea3631a56dae285f558842b2f22c6c66475ab338",
+  "checkedAt": "2026-10-14",
+  "method": "Tracked <engine>/skills/*/SKILL.md files in the unified repository; original engine-specific implementations preserved.",
   "skillNamesMatch": true,
-  "sharedCount": 115,
+  "sharedCount": 114,
   "repositories": {
-    "claude-for-research": {
-      "commit": "ccec0679a9534e1757d4e358e610023d9e33d11f",
-      "count": 115,
+    "claude": {
+      "commit": "9f2a5e0d639feeff1820677936630f401c299603",
+      "count": 114,
       "skills": [
         "a-evolve",
         "academic-plotting",
@@ -35,7 +35,6 @@
         "deepspeed",
         "diffdock",
         "docker",
-        "eli5",
         "esmfold2",
         "evo2",
         "experiment-forge",
@@ -123,11 +122,12 @@
         "watch",
         "weights-and-biases",
         "whisper"
-      ]
+      ],
+      "path": "claude/skills"
     },
-    "codex-for-research": {
-      "commit": "54b33b26d84696b42a94116252872845b49bb166",
-      "count": 115,
+    "codex": {
+      "commit": "9f2a5e0d639feeff1820677936630f401c299603",
+      "count": 114,
       "skills": [
         "a-evolve",
         "academic-plotting",
@@ -156,7 +156,6 @@
         "deepspeed",
         "diffdock",
         "docker",
-        "eli5",
         "esmfold2",
         "evo2",
         "experiment-forge",
@@ -244,11 +243,13 @@
         "watch",
         "weights-and-biases",
         "whisper"
-      ]
+      ],
+      "path": "codex/skills"
     }
   },
   "notes": [
     "Counts come from files, not older README labels.",
     "Matching skill names do not claim byte-identical instructions or identical CLI execution mechanisms."
-  ]
+  ],
+  "repository": "https://github.com/Yichen-ZJU/lemvo"
 }

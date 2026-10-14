@@ -1,0 +1,29 @@
+/* Paper Narrative extends the existing dark, mint-accented writing feature. */
+.writing-feature { gap: 28px 45px; }
+.writing-pipeline { align-self: start; }
+.writing-copy .writing-shared-plan { margin-top: 13px; color: #a2b8aa; }
+.writing-source-links { display: flex; flex-wrap: wrap; gap: 12px 24px; margin-top: 22px; }
+.writing-copy .writing-source-links .text-link { margin-top: 0; }
+.narrative-lenses { grid-column: 1 / -1; border-top: 1px solid #304636; padding-top: 24px; min-width: 0; }
+.narrative-lenses-heading { display: flex; justify-content: space-between; align-items: flex-end; gap: 18px; margin-bottom: 18px; }
+.narrative-lenses-heading .mono-label { color: #89aa96; font-size: 8px; letter-spacing: 1.2px; }
+.narrative-lenses-heading h4 { font-size: 17px; font-weight: 500; line-height: 1.5; margin: 7px 0 0; letter-spacing: -.3px; }
+.narrative-lenses-heading > p { font-size: 10px; line-height: 1.7; max-width: 260px; color: #90aa9a; }
+.narrative-lens-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
+.narrative-lens { display: flex; gap: 12px; padding: 15px 14px; border: 1px solid #2e4435; border-radius: 5px; background: #111914; }
+.narrative-lens > span { font: 9px/1.8 var(--mono); color: #87b79a; padding-top: 1px; }
+.narrative-lens strong { display: block; font-size: 11px; font-weight: 500; line-height: 1.6; color: #d0e5d7; }
+.narrative-lens p { margin-top: 5px; font-size: 10px; line-height: 1.75; color: #8ea898; }
+.narrative-landing { margin-top: 18px; font-size: 11px; line-height: 1.8; color: #b4d1bf; }
+@media (max-width: 1000px) {
+  .narrative-lens-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 800px) {
+  .narrative-lenses-heading { align-items: flex-start; flex-direction: column; gap: 8px; }
+  .narrative-lenses-heading > p { max-width: none; }
+}
+@media (max-width: 480px) {
+  .narrative-lens-grid { grid-template-columns: 1fr; gap: 8px; }
+  .narrative-lens { padding: 13px 14px; }
+  .narrative-lenses-heading h4 { font-size: 16px; }
+}

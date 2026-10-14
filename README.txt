@@ -1,7 +1,8 @@
 LEMVO — BILINGUAL HOMEPAGE
 
 A research agent that thinks and acts. One system, two CLI engines.
-Lemvo for Claude Code / Lemvo for Codex.
+One repository: https://github.com/Yichen-ZJU/lemvo
+Engine implementations: claude/ and codex/.
 
 Open index.html in a browser, or serve this folder with any static file server.
 No build, package installation, API keys, or external assets are required.
@@ -11,26 +12,38 @@ Files
   styles.css          Base responsive dark theme and motion
   lemvo-brand.css   Shared brand accents and engine-title typography
   research-stages.css  Research, optimization, and compact footer credits
+  paper-narrative.css  Contribution-led writing and six scientific story routes
   app.js              English copy, language switch, tabs, search, copy, and demo
-  skills-data.js      115 shared skill entries, source links, 12 topic groups
+  skills-data.js      114 shared skill entries, source links, 12 topic groups
   assets/logo.png     Approved A dual-loop lens brand mark
-  workflow-demo.js    Twelve-step bilingual teaching animation and playback
+  research-continuity.css  Continuous-research cards, anchor offsets and handoff
+  workflow-demo.js    Fourteen-step bilingual teaching animation and playback
   workflow-demo.css   Nested-loop visualization and motion
   demo/release-snapshot.json  Pinned repository skill-count evidence
 
 Research narrative
   Research Orchestrator connects question framing, literature, hypotheses,
-  method development, experiments, reflection, and writing with 115 skills.
+  method development, experiments, reflection, and writing with 114 skills.
   Research routes are chosen for the task: idea-led discovery, reproduction
   and improvement of existing methods, or a standalone Forge task package.
   Autoresearch executes the unattended inner loop; the outer loop interprets
   findings and revises direction. ArXiv MCP provides full-text retrieval.
+  Paper Narrative shapes one shared argument across the abstract, introduction,
+  evidence, section order, figure order, and conclusion. Six scientific story
+  routes are selected for the contribution, not imposed as a fixed template.
+  Continuous-research conventions keep state and findings across turns, bound
+  preparation, launch small probes when ready, and turn diagnostics into changes.
+  Natural-language entry: open the CLI in a project folder and say what to research.
+  Research Orchestrator establishes state and coordinates the two loops.
+  Guided and unattended modes share project state; lemvo-run.sh supplies resident
+  cross-turn execution for both CLIs. Installation does not start a controller.
 
-Repository snapshot checked 2026-10-08
-  Claude: 115 skills at ccec0679a9534e1757d4e358e610023d9e33d11f
-  Codex: 115 skills at 54b33b26d84696b42a94116252872845b49bb166
-  Shared names: 115.
-  Count convention: skills/<directory>/SKILL.md; not agents or nested references.
+Repository snapshot checked 2026-10-14
+  Unified repository commit: 9f2a5e0d639feeff1820677936630f401c299603
+  Claude: 114 skills under claude/skills.
+  Codex: 114 skills under codex/skills.
+  Shared names: 114.
+  Count convention: <engine>/skills/<directory>/SKILL.md; not agents or nested references.
 
 Language
   Defaults to Chinese. The switch remembers the choice in this browser.
@@ -39,10 +52,11 @@ Language
 
 Teaching demonstration
   Both animations are illustrative, not live model calls or training runs.
-  The main twelve-step example improves a handwritten-digit classifier:
-    question -> literature/ideas -> Forge -> inner loop (keep/revert)
-    -> outer reflection (DEEPEN) -> revised hypothesis/protocol
-    -> inner loop with confirmation runs -> CONCLUDE -> writing and review.
+  The main fourteen-step example studies a handwritten-digit classifier:
+    question -> literature/ideas -> optional Forge -> READY_TO_PROBE -> baseline
+    -> inner loop (keep/revert) -> outer reflection (DEEPEN)
+    -> revised hypothesis/protocol -> concrete method change -> confirmation
+    -> CONCLUDE -> shared Paper Narrative -> writing and review.
   All accuracy values are fictional. The example contains no personal research
   results, experiment commit IDs, or real validation-check counts.
   Play/pause, next step, restart, and the progress slider are keyboard accessible.
@@ -72,6 +86,6 @@ Acknowledgements
 
 Publishing
   Upload static files with their relative paths to your chosen web host.
-  Shared homepage: https://yichen-zju.github.io/claude-for-research/
+  Shared homepage: https://yichen-zju.github.io/lemvo/
   GitHub repository homepages use the same approved dual-loop lens identity.
   If repositories change, refresh skills-data.js, counts, and pinned links together.

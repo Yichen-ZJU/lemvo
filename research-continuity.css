@@ -1,0 +1,24 @@
+/* Continuous research, using the established dark/mint design system. */
+main [id]{scroll-margin-top:96px}
+.research-action-links{display:flex;align-items:center;gap:14px;margin-top:20px;font-size:11px;color:#85a891}
+.research-action-links a{color:#c5e6d1;border-bottom:1px solid #385442;padding-bottom:3px}
+.research-action-links a:hover{color:var(--mint);border-color:var(--mint)}
+.route-continuation{padding:17px 24px;border-top:1px solid #314437;background:#111a14;color:#a3bdac;font-size:11px;line-height:1.85}
+.continuity-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));border:1px solid #354c3d;border-radius:8px;overflow:hidden;background:#151f19}
+.continuity-card{display:flex;flex-direction:column;min-width:0;padding:25px 24px;border-right:1px solid #354c3d}
+.continuity-card:last-child{border:0}
+.continuity-card .mono-label{font-size:8px;letter-spacing:.7px;color:#8fb79e}
+.continuity-card h3{font-size:18px;font-weight:500;letter-spacing:-.3px;line-height:1.5;margin:17px 0 12px}
+.continuity-card p{font-size:12px;line-height:1.9;color:#a5baac;flex:1}
+.continuity-card code{font:9px/1.8 var(--mono);color:#a9d5b9;overflow-wrap:anywhere;display:block;margin-top:24px;padding-top:15px;border-top:1px solid #2c4233}
+.continuity-handoff{display:flex;justify-content:space-between;align-items:center;gap:25px;margin-top:18px}
+.continuity-handoff p{font-size:11px;line-height:1.9;color:#8ea798}
+.continuity-handoff a{flex-shrink:0;color:var(--mint)}
+#continuation-details{margin-top:18px;padding-top:15px;border-top:1px solid #2d4133}
+#continuation-details summary{font-size:10px;color:#bdd6c7;line-height:1.8}
+#continuation-details summary:before{content:"+ ";color:var(--mint)}
+#continuation-details[open] summary:before{content:"− "}
+#continuation-details p{margin-top:12px;font-size:10px;line-height:1.9;overflow-wrap:anywhere}
+#continuation-details .text-link{font-size:10px;margin-top:13px;color:var(--mint)}
+@media(max-width:1100px){.continuity-grid{grid-template-columns:repeat(2,minmax(0,1fr))}.continuity-card:nth-child(2){border-right:0}.continuity-card:nth-child(-n+2){border-bottom:1px solid #354c3d}}
+@media(max-width:600px){.continuity-grid{grid-template-columns:1fr}.continuity-card{border-right:0;border-bottom:1px solid #354c3d;padding:24px}.continuity-card h3{font-size:20px;margin-top:13px}.continuity-card code{margin-top:17px}.continuity-handoff{display:block}.continuity-handoff a{margin-top:13px}.route-continuation{padding:16px 19px;font-size:10px}.research-action-links{gap:12px}}
