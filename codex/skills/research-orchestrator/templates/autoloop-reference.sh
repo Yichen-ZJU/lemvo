@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 参考外层循环脚本 v4.9（round-29-fix3：恢复结算 + 授权来源 + 助手迁移）
+# 单轮适配器 v4.10：初始化/可唤醒等待/终态协议/会话代际隔离（2026-10-17）
 #  v4.8 变更（对 v4.7，均带隔离回归）：
 #  费用政策（用户决定 2026-10-14）：USD 费用默认只统计、不停止、不缩实验、
 #    不否定方向；金额停止门仅当 budget.cap_authorized: yes（真实用户明确授权、
@@ -67,7 +67,9 @@
 set -uo pipefail
 # One version source: write_helper emits this marker into the generated Python.
 # Bump on helper changes so existing project-local helpers migrate exactly once.
-HELPER_VERSION="4.9"
+HELPER_VERSION="4.10"
+RUNTIME_SUPPORT="$(cd "$(dirname "$0")" && pwd)/runtime-support.py"
+[ -f "$RUNTIME_SUPPORT" ] || { echo "Missing runtime-support.py: install the complete research-orchestrator skill."; exit 64; }
 
 # ── --init 模式 ──
 if [ "${1:-}" = "--init" ]; then
@@ -137,6 +139,8 @@ else
   CALLER_MSG="${2:-}"
 fi
 cd "$PROJ_DIR" || exit 64
+PROJ_DIR="$(pwd -P)"
+SESSION_EPOCH="$(python3 "$RUNTIME_SUPPORT" epoch)" || exit 4
 # v4.3a：引擎身份在项目目录内读取
 ENGINE="${ENGINE:-$(cat .lemvo-engine 2>/dev/null || echo codex)}"
 CLAUDE_BIN="${CLAUDE_BIN:-claude}"
@@ -668,6 +672,26 @@ def cmd_account():
     open(STATE, "w", encoding="utf-8").write("\n".join(LINES) + "\n")
     print("WALL_NOW=" + str(wall))
 
+def output_events(path):
+    """JSON object/array or JSONL; unwrap only declared CLI event envelopes."""
+    try:
+        text = open(path, encoding="utf-8", errors="replace").read()
+    except OSError:
+        return
+    try:
+        obj = json.loads(text)
+        candidates = obj if isinstance(obj, list) else [obj]
+    except ValueError:
+        candidates = []
+        for line in text.splitlines():
+            try: candidates.append(json.loads(line))
+            except ValueError: continue
+    for ev in candidates:
+        if not isinstance(ev, dict): continue
+        if ev.get("type") in ("event_msg", "event") and isinstance(ev.get("payload"), dict):
+            ev = ev["payload"]
+        yield ev
+
 def cmd_usage_from():
     """v4.6：只从 JSON 事件的 usage/token_usage 容器解析；input/output/
     cache_read/cache_write 分列，逐字段判存在——缺失保留 unknown 不补 0；
@@ -698,17 +722,12 @@ def cmd_usage_from():
                 seen[sk] = True
                 return
     try:
-        for ln in open(sys.argv[2], encoding="utf-8", errors="replace"):
-            ln = ln.strip()
-            if not ln.startswith("{"):
-                continue
-            try:
-                ev = json.loads(ln)
-            except ValueError:
-                continue
-            if not isinstance(ev, dict):
+        for ev in output_events(sys.argv[2]):
+            if ev.get("type") not in ("result", "turn.completed", "token_count"):
                 continue
             u = ev.get("usage") or ev.get("token_usage")
+            if ev.get("type") == "token_count" and isinstance(ev.get("info"), dict):
+                u = ev["info"].get("total_token_usage")
             if isinstance(u, dict):
                 acc(u, ("input_tokens", "input_tokens_count", "prompt_tokens"), "in")
                 acc(u, ("output_tokens", "output_tokens_count", "completion_tokens"), "out")
@@ -763,21 +782,14 @@ def cmd_outcome_from():
     outcome = "none"
     err = ""
     try:
-        for ln in open(sys.argv[2], encoding="utf-8", errors="replace"):
-            ln = ln.strip()
-            if not ln.startswith("{"):
-                continue
-            try:
-                ev = json.loads(ln)
-            except ValueError:
-                continue
-            if not isinstance(ev, dict):
-                continue
+        for ev in output_events(sys.argv[2]):
             t = ev.get("type", "")
             if t in ("turn.failed", "turn.aborted"):
                 outcome = "failed"
                 e = ev.get("error")
                 err = json.dumps(e, ensure_ascii=False)[:300] if e else t
+            elif t == "turn.completed":
+                outcome = "ok"
             elif t == "result":
                 if ev.get("is_error") is True or str(ev.get("subtype", "")).startswith("error"):
                     outcome = "failed"
@@ -935,12 +947,22 @@ append_engine_logs() {  # 原始 stdout/stderr 全量入 campaign_log（服务�
 if [ -n "$RECOVER_TD" ]; then
   TD="$RECOVER_TD"
   [ -d "$TD" ] || { echo "turn 目录不存在: $TD"; exit 64; }
+  REC_EPOCH=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]+"/manifest.json")).get("session_epoch","legacy"))' "$TD" 2>/dev/null) || exit 4
+  if [ "$REC_EPOCH" != "$SESSION_EPOCH" ]; then
+    say "Old session epoch: keeping evidence without adopting $TD"
+    emit_reason "STALE_SESSION_EPOCH"; exit 9
+  fi
   if [ -f "$TD/result.json" ]; then echo "already-settled"; exit 0; fi
   TURN_ID=$(python3 -c 'import json,sys
 try: print(json.load(open(sys.argv[1]+"/manifest.json")).get("turn_id",""))
 except Exception: print("")' "$TD" 2>/dev/null)
   [ -n "$TURN_ID" ] || TURN_ID=$(basename "$TD")
   OUT="$TD/engine-stdout.jsonl"; ERR="$TD/engine-stderr.log"
+  REC_OUTCOME=$(python3 "$HELPER" outcome-from "$OUT" | sed -n 's/^OUTCOME=//p')
+  if [ "$REC_OUTCOME" != "ok" ]; then
+    say "Orphan output has no successful terminal event; keeping inputs and evidence for recovery."
+    emit_reason "PROTOCOL"; exit 9
+  fi
   NEW_SID=""
   if [ -f "$OUT" ] || [ -f "$ERR" ]; then
     NEW_SID=$(grep -h -oE '"session_id"[": ]+[a-f0-9-]{8,}' "$OUT" "$ERR" 2>/dev/null | head -1 | grep -oE '[a-f0-9]{8}-[a-f0-9-]+' \
@@ -949,7 +971,12 @@ except Exception: print("")' "$TD" 2>/dev/null)
            || true)
   fi
   # BUG-3：毒会话不复活——账本有该 SID 的 session-poisoned 事件则不收养
-  if [ -n "$NEW_SID" ] && grep -q "\"session-poisoned\".*\"$NEW_SID\"" "$LEDGER" 2>/dev/null; then
+  if [ -n "$NEW_SID" ] && python3 -c 'import json,sys
+for line in open(sys.argv[1]):
+ try: e=json.loads(line)
+ except ValueError: continue
+ if e.get("type")=="session-poisoned" and e.get("sid")==sys.argv[2]: sys.exit(0)
+sys.exit(1)' "$LEDGER" "$NEW_SID" 2>/dev/null; then
     say "recover：SID $NEW_SID 有 session-poisoned 记录——不收养（防毒会话复活）"
     NEW_SID=""
   fi
@@ -1079,6 +1106,7 @@ if [ -d .git ]; then
 fi
 
 # ── 1) 初始化 + 读取状态 ──
+python3 "$RUNTIME_SUPPORT" bootstrap || { emit_reason "ACCOUNTING"; exit 4; }
 helper init >/dev/null || exit 4
 DECISION_FILE=$(mktemp); helper prepare > "$DECISION_FILE" || { rm -f "$DECISION_FILE"; exit 4; }
 . "$DECISION_FILE"; rm -f "$DECISION_FILE"
@@ -1091,7 +1119,7 @@ if [ "$BLOCKING" != "none" ]; then
   if [ "$RC_MODE" = "structured" ]; then emit_reason "$BLOCKING"; exit 6; fi
   exit 0
 fi
-if [ "$WAITING" = "yes" ]; then
+if [ "$WAITING" = "yes" ] && [ -z "${LEMVO_RESOURCE_WAKE:-}" ]; then
   say "WAITING_RESOURCE——减频等待"
   if [ "$RC_MODE" = "structured" ]; then emit_reason "WAITING_RESOURCE"; exit 7; fi
   sleep 600; exec "$0" "$@"
@@ -1226,6 +1254,9 @@ MSG
 fi
 
 # ── R2/R3：turn 目录 + manifest（控制器给 LEMVO_TURN_DIR 则用之，否则自建）──
+FULL_MSG=$(mktemp)
+python3 "$RUNTIME_SUPPORT" prompt "$MSG_SOURCE" "$FULL_MSG" || { rm -f "$FULL_MSG"; emit_reason "PROTOCOL"; exit 9; }
+MSG_SOURCE="$FULL_MSG"
 TD="${LEMVO_TURN_DIR:-}"
 TURN_ID="${LEMVO_TURN_ID:-}"
 if [ -z "$TD" ]; then
@@ -1236,6 +1267,7 @@ if [ -z "$TD" ]; then
 import json, os, socket, sys, time
 td, tid, proj, eng = sys.argv[1:5]
 man = {"schema_version": 1, "schema": "lemvo-turn-manifest",
+       "session_epoch": open(".lemvo-session-epoch").read().strip() if os.path.exists(".lemvo-session-epoch") else "legacy",
        "campaign_id": socket.gethostname() + ":" + os.path.basename(os.path.realpath(proj)),
        "turn_id": tid, "host": socket.gethostname(), "controller_pid": None,
        "engine": eng, "status": "dispatched",
@@ -1254,7 +1286,15 @@ json.dump(d, open(p, "w"), indent=1)
 PYE
 echo "$TURN_ID|$$|$ADAPTER_START" > .autoloop-turn-active
 touch "$TD/.turn-start"   # BUG-3：本轮产物判定的 mtime 基准
-trap 'rm -f .autoloop-turn-active .autoloop-engine.pid' EXIT
+cleanup_turn() {
+  rm -f "$FULL_MSG"
+  if [ "$(python3 "$RUNTIME_SUPPORT" epoch)" = "$SESSION_EPOCH" ]; then
+    grep -q "^$TURN_ID|" .autoloop-turn-active 2>/dev/null && rm -f .autoloop-turn-active .autoloop-engine.pid
+  fi
+  return 0
+}
+trap cleanup_turn EXIT
+python3 "$RUNTIME_SUPPORT" progress-snapshot "$TD/progress-before.json" || exit 4
 
 # ── result.json（E-result：结果驱动闭环的每轮凭据）──
 write_result() {  # $1=status $2=next_action $3=engine_rc
@@ -1321,11 +1361,15 @@ CLAUDE_PERMS="${CLAUDE_PERMS_EXTRA:-}"   # 窄白名单入口（如 --allowedToo
 CODEX_SANDBOX="${CODEX_SANDBOX:-workspace-write}"   # BUG-2：0.16x exec 默认只读+需审批；显式给可写工作区（campaign 目录=cwd）；不要用 danger-full-access 做全局默认
 run_engine
 
+if [ "$(python3 "$RUNTIME_SUPPORT" epoch)" != "$SESSION_EPOCH" ]; then
+  say "Session was reset; this old turn will not write SID, state or accounting."
+  emit_reason "STALE_SESSION_EPOCH"; exit 9
+fi
+
 # BUG-3：产物判定在引擎结束后立即做（settle/account 的账本书写不算研究产物；
 # 引擎对 research-state.yaml 的真实编辑算产物）
 NEW_ARTIFACT=""
-[ -f "$TD/.turn-start" ] && NEW_ARTIFACT=$(find . -maxdepth 2 -type f -newer "$TD/.turn-start" \
-  -not -path "./.*" -not -path "./turns/*" 2>/dev/null | head -1)
+NEW_ARTIFACT=$(python3 "$RUNTIME_SUPPORT" progress-changed "$TD/progress-before.json") || exit 4
 
 # ── 6) 会话 ID 提取（claude session_id | codex thread_id | 文本三拼写）──
 NEW_SID=$( grep -h -oE '"session_id"[": ]+[a-f0-9-]{8,}' "$TD/engine-stdout.jsonl" "$TD/engine-stderr.log" 2>/dev/null | head -1 | grep -oE '[a-f0-9]{8}-[a-f0-9-]+' \
@@ -1403,7 +1447,7 @@ if [ "$rc" -ne 0 ]; then
   fi
 else
   OUTCOME=$(python3 "$HELPER" outcome-from "$TD/engine-stdout.jsonl" 2>/dev/null | grep -oE 'OUTCOME=\w+' | cut -d= -f2)
-  if [ "$OUTCOME" = "failed" ]; then
+  if [ "$OUTCOME" != "ok" ]; then
     # E：引擎自报失败（结构化错误事件）——rc=0 也判失败，不写 resume-ok
     say "引擎结构化失败（rc=0 但结果事件为 error）——记 engine-error，保持 SID"
     EE=$(mktemp)
@@ -1431,12 +1475,15 @@ else
 fi
 
 # ── 8) 结算（凭据类型化 + 真账 + usage 分列 + 费用 delta 口径）──
-SETTLE=$(mktemp); helper settle > "$SETTLE" || { rm -f "$SETTLE"; say "结算失败——保留输出，账未更新"; }
+SETTLE=$(mktemp); helper settle > "$SETTLE" || { rm -f "$SETTLE"; say "Accounting failed; preserving output and queued inputs."; emit_reason "ACCOUNTING"; exit 4; }
 . "$SETTLE" 2>/dev/null || true; rm -f "$SETTLE"
 parse_usage "$TD/engine-stdout.jsonl" "${CUR_SID:-none}"
+if [ "$U_IN" = "unknown" ] || [ "$U_OUT" = "unknown" ]; then
+  say "Usage warning: missing/unrecognized token fields; counters, wall time and liveness checks remain active."
+fi
 TURN_ELAPSED=$(( $(date +%s) - TURN_START ))
 python3 "$HELPER" account "$TURN_ELAPSED" "$U_IN" "$U_OUT" >/dev/null \
-  || printf 'accounting-error\tcmd=account\tdt=%s\n' "$(date -u +%FT%TZ)" >> "$LEDGER"
+  || { emit_reason "ACCOUNTING"; exit 4; }
 # 费用口径：reported=引擎报告值；delta=同 SID 对上次报告求差（claude resume 累计量）；
 # codex 每调独立（per-call）。不把累计值逐轮相加，state total_cost 保持不累计。
 COST_DELTA=unknown; COST_BASIS=unknown
@@ -1505,7 +1552,7 @@ say "本轮 rc=$rc；NEW_PROGRESS=${NEW_PROGRESS:-?}（类型化凭据=${ARTIFAC
 
 # ── BUG-3：空转/毒会话检测（引擎 rc=0 也会空转——礼貌 loop 无产物无进展）──
 # NEW_ARTIFACT 已在引擎结束时判定（不含账本/控制器写入）
-if [ -z "$NEW_ARTIFACT" ]; then
+if [ -z "$NEW_ARTIFACT" ] && [ "${NEW_PROGRESS:-no}" != "yes" ]; then
   STALL_N=$(( $(cat .autoloop-stall-count 2>/dev/null || echo 0) + 1 )); echo "$STALL_N" > .autoloop-stall-count
 else
   echo 0 > .autoloop-stall-count; echo 0 > .autoloop-poison-count
@@ -1525,7 +1572,7 @@ if [ -z "$NEW_ARTIFACT" ] && grep -qiE "$POISON_RE" "$TD/engine-stdout.jsonl" 2>
   fi
 fi
 # 零产物空转兜底闸门：连续 N 轮（默认 5）无任何项目产物 → 明确决策点，不礼貌空转
-if [ -z "$NEW_ARTIFACT" ] && [ "$STALL_N" -ge "${LEMVO_STALL_ARTIFACT_N:-5}" ]; then
+if [ -z "$NEW_ARTIFACT" ] && [ "${NEW_PROGRESS:-no}" != "yes" ] && [ "${STALL_N:-0}" -ge "${LEMVO_STALL_ARTIFACT_N:-5}" ]; then
   say "连续 $STALL_N 轮零产物（引擎 rc=0 但无建设输出）——空转停滞，转决策点待人查"
   emit_reason "STALL_NO_ARTIFACT"
   SB=$(mktemp); printf '{"type":"stall-no-artifact","turn_id":"%s","turns":%d,"ts":"%s"}\n' \

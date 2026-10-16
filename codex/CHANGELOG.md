@@ -1,5 +1,13 @@
 # CHANGELOG — codex-for-research
 
+## 2026-10-17 Runtime liveness and recovery
+
+- Bootstrap machine accounting independently of the model, including caller-supplied first turns.
+- Persist resource recheck deadlines, expose unobservable jobs, and retain non-success job evidence.
+- Fence session resets with an epoch; record queued/submitted/delivered guidance and reject unknown terminal events.
+- Add opt-in inline delegation, takeover/runtime-path diagnostics and 27 CPU runtime regressions.
+- Resource statistics and scientific verdict policies are unchanged. This validates deterministic runtime behavior, not research outcomes.
+
 ## 2026-10-14 Runtime recovery and policy consistency
 
 - Preserve cumulative model costs across recovered turns, including old string snapshots; missing authorization sources do not activate a monetary limit. GPU usage remains statistics only.

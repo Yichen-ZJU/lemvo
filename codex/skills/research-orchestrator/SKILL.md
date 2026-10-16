@@ -22,7 +22,7 @@ argument-hint: <research-question-or-project-dir>
 - **unattended（全自动）**：在已有授权与预算内，自主完成调研、构思、实验、
   结果分析、方法修订与收尾，不逐阶段等你回复；只有真正的新授权缺口才集中提出。
 
-**启动提问（REQUIRED）**：新课题的第一轮回复必须显式向用户提出模式选择：
+**启动提问（REQUIRED）**：新课题尚无合法 `.lemvo-mode`、且用户未声明模式时，第一轮显式提出模式选择：
 「全自动（unattended）还是半自动（guided）？」并各用一句话介绍——guided：每个
 主要阶段（调研综合、构思收敛、实验批次、方向决策）结束停下来汇报并等你确认；
 unattended：在授权与预算内全程自主推进，只在真正的新授权缺口集中找你。附一句
@@ -35,6 +35,23 @@ unattended：在授权与预算内全程自主推进，只在真正的新授权�
 - guided → unattended：直接从当前状态继续，不重新初始化。
 两种模式共享同一份 research-state、实验结果、findings 与累计预算，切换不清零。
 控制器在轮边界读取模式，已派发的在途轮与在跑作业自然跑完（lemvo-run 契约）。
+
+## Runtime recovery and dispatch
+
+Read [runtime-recovery.md](references/runtime-recovery.md) when starting a controller,
+taking over an existing campaign, diagnosing a wait, or resetting a session.
+The controller creates accounting state on first use; missing bookkeeping is not
+a scientific veto. An already valid `.lemvo-mode` counts as a selected mode and
+must not trigger the startup question again.
+
+`.lemvo-delegation` selects `auto` or `inline` independently of guided/unattended.
+In `inline`, perform researcher, verifier and reviewer functions sequentially in
+the lead session, saving their evidence and findings. Do not spawn subagents or
+describe self-review as independent review. Use this setting when requested or
+when child dispatch is unavailable; the same scientific standards and existing
+authorization apply. At safe phase boundaries, checkpoint and return if new
+`.lemvo-steer-queue/q-*.md` guidance is waiting, so the controller can deliver it.
+Only the controller acknowledges/archives queue files.
 
 ## 路由表（本环境的执行层）
 
@@ -331,7 +348,7 @@ research-state.yaml 的 supported / refuted / inconclusive 字段承担全部
   guided = 每段有独立产物的工作结束，停在清晰交接点等人（`lemvo-run.sh
   advance` 或交互推进）；unattended = 控制器自动推进。两种模式共用同一
   campaign ID、research-state、累计预算；切换随时生效，在跑训练不中断。
-- **`.lemvo-steer.md`**：用户指导队列。每轮开始先读它并纳入本轮决策
+- **`.lemvo-steer-queue/q-*.md`**：用户指导队列。每轮开始先读本轮注入的消息并纳入决策
   （控制器在轮边界注入，成功后归档）；guidance 不需要先终止项目。
 - **`.lemvo-jobs.json`**：启动后台训练/评测作业时**必须**写（并移除已完成
   项）：`[{"name","run_id","done_file"(完成标志文件，优先)|"pid","timeout_min"}]`。

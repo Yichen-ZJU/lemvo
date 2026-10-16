@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lemvo-run v3 — 双模式常驻控制器（round-23：owner 原子锁/整轮 manifest/作业终态/结果驱动闭环）
+# lemvo-run v4 — 可唤醒等待、指导投递凭据、会话代际重置与接管清单（2026-10-17）
 #  C1 原子 owner 锁：锁目录在临时目录完整初始化后原子 rename 发布（不存在
 #     "mkdir 成功但 PID 未写完"窗口）；缺/坏 PID 一律不判死 owner（宽限期内
 #     等待，超宽限才隔离）；退出清理核对锁身份，绝不误删他人锁；PID 复用
@@ -36,6 +36,8 @@
 set -uo pipefail
 CMD="${1:-}"; PROJ="${2:-}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
+RUNTIME_SUPPORT="$HERE/runtime-support.py"
+[ -f "$RUNTIME_SUPPORT" ] || { echo "Missing runtime-support.py: install the complete research-orchestrator skill."; exit 64; }
 AUTOLOOP="${AUTOLOOP_SCRIPT:-$HERE/autoloop-reference.sh}"
 MODE_F=.lemvo-mode; ENGINE_F=.lemvo-engine; STATUS_F=.lemvo-status
 LOCKD=.lemvo-owner.lock; QUEUE=.lemvo-steer-queue; ARCHIVE=.lemvo-steer-archive
@@ -76,9 +78,15 @@ set_status() {  # $1=状态[|细节]（或 $1=状态 $2=细节）；中央解析
 usage() { sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 64; }
 [ -n "$CMD" ] && [ -n "$PROJ" ] || usage
 cd "$PROJ" || { echo "项目目录不存在: $PROJ"; exit 64; }
+PROJ="$(pwd -P)"
 
 pid_start() {  # /proc/PID/stat 第 22 字段（ starttime ）；strip 掉 comm 后第 20
   sed 's/.*) //' "/proc/$1/stat" 2>/dev/null | cut -d' ' -f20
+}
+pid_live_identity() {
+  [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
+  [ "$(pid_start "$1")" = "$2" ] || return 1
+  [ "$(sed 's/.*) //' "/proc/$1/stat" 2>/dev/null | cut -d' ' -f1)" != "Z" ]
 }
 
 # ── C1：原子 owner 锁（临时目录完整初始化 → rename 发布；身份核对）──
@@ -142,7 +150,7 @@ turn_inflight() {  # .autoloop-turn-active = turn_id|adapter_pid|adapter_start
     return 1
   fi
   IFS='|' read -r tid apid ast < .autoloop-turn-active 2>/dev/null || { rm -f .autoloop-turn-active; return 1; }
-  if [ -n "$apid" ] && kill -0 "$apid" 2>/dev/null && [ "$(pid_start "$apid" 2>/dev/null)" = "$ast" ]; then
+  if pid_live_identity "$apid" "$ast"; then
     return 0   # adapter 仍在整轮结算中（模型结束≠结算结束）
   fi
   engine_pid_alive && return 0   # adapter 亡而孤儿引擎尚在——同样在途
@@ -155,15 +163,24 @@ enqueue_steer() {  # $1=内容来源文件（只读复制） $2=标签；输出�
   local src="$1" tag="${2:-msg}" id tmp
   [ -f "$src" ] || return 1
   mkdir -p "$QUEUE"
-  id="$(date +%Y%m%d-%H%M%S)-$$-${tag}"
+  id="$(date +%Y%m%d-%H%M%S%N)-$$-${tag}"
   tmp="$QUEUE/.tmp-$id.$(date +%s%N)"
   { echo "<!-- message_id: q-$id -->"; echo "<!-- created: $(date -u +%FT%TZ) -->"; cat "$src"; } > "$tmp" || { rm -f "$tmp"; return 1; }
   mv "$tmp" "$QUEUE/q-$id.md" || { rm -f "$tmp"; return 1; }
+  local qlist
+  qlist=$(mktemp); echo "$QUEUE/q-$id.md" > "$qlist"
+  python3 "$RUNTIME_SUPPORT" delivery queued "$qlist" >&2
+  rm -f "$qlist"
   echo "$QUEUE/q-$id.md"
 }
 
 # ── 子命令 ──
 case "$CMD" in
+  doctor)
+    python3 "$RUNTIME_SUPPORT" doctor "$0"; exit $?;;
+  delegation)
+    case "${3:-}" in auto|inline) echo "$3" > .lemvo-delegation;; *) echo "delegation: auto|inline"; exit 64;; esac
+    say "delegation=$3 (effective at the next turn; running experiments continue)"; exit 0;;
   switch)
     case "${3:-}" in
       guided) echo guided > "$MODE_F"; log "已请求切 guided（轮边界生效；控制器保持驻留等请求）";;
@@ -216,6 +233,13 @@ for j in jobs:
     if not isinstance(j, dict):
         print("CORRUPT"); sys.exit(0)      # 元素形状错 = CORRUPT
 now = time.time()
+def alive(pid, expected=None):
+    try:
+        pid = int(pid)
+        if pid <= 0: return False
+        with open('/proc/%d/stat' % pid) as f: fields=f.read().rsplit(')',1)[1].split()
+        return fields[0] != 'Z' and (not expected or str(expected)==fields[19])
+    except (OSError, ValueError, IndexError): return False
 states = []
 for j in jobs:
     rid = j.get("run_id")
@@ -249,26 +273,20 @@ for j in jobs:
             # R2：预期 JSON 但截断/损坏 ≠ 旧式哨兵。生产者核验存活 → 继续等待；
             # 已结束/无法核验 → 非成功终态（不提前唤醒下游分析）
             if j.get("pid") and not ext:
-                try:
-                    os.kill(int(j["pid"]), 0)
+                if alive(j["pid"], j.get("pid_start")):
                     st = "running"
-                except ProcessLookupError:
+                else:
                     st = "failed"; d["result"] = {"corrupt_result": df}
-                except (ValueError, PermissionError):
-                    st = "running"
             else:
                 st = "unknown"; d["result"] = {"corrupt_result": df}
         else:                              # 旧式哨兵（非 JSON 文本）：显式兼容视为完成
             st = "succeeded"; d["result"] = {"sentinel": "non-json"}
     if st is None:
         if j.get("pid") and not ext:
-            try:
-                os.kill(int(j["pid"]), 0)
+            if alive(j["pid"], j.get("pid_start")):
                 st = "running"
-            except ProcessLookupError:
+            else:
                 st = "ended"               # 进程结束 ≠ 成功（C4）
-            except (ValueError, PermissionError):
-                st = "running"
         elif ext:
             st = "unknown"                 # 外部 coordinator：顶层只持接管身份，无 done_file 不可观测
         else:
@@ -277,6 +295,10 @@ for j in jobs:
     if st == "running" and started and j.get("timeout_min"):
         if (now - float(started)) > float(j["timeout_min"]) * 60:
             st = "timed_out"               # 超时保留身份（C4）
+    if st == "running" and (not j.get("pid") or not j.get("pid_start")) and started and not j.get("timeout_min"):
+        if now - float(started) >= float(os.environ.get("LEMVO_UNKNOWN_JOB_SEC", "900")):
+            st = "unknown"
+            d["result"] = {"reason":"no_observable_producer_or_result", "done_file":df}
     states.append({"name": j.get("name", "?"), "status": st, **d})
 import json as J
 open(".lemvo-jobstates.json", "w").write(J.dumps(states))
@@ -400,7 +422,7 @@ steer_archive_consumed() {  # 仅归档本轮快照清单内的（轮中提交�
 # ── 对账门（返回 0=可推进；1=有活作业）──
 reconcile_gate() {
   stamp_jobs_started
-  ST=$(jobs_reconcile_once)
+  ST=$(jobs_reconcile_once) || ST=CORRUPT
   case "$ST" in
     PENDING*) say "有作业在跑（${ST#PENDING }）——本轮不推进，等待完成"; return 1;;
     TIMEOUT) write_receipts timeout; mv "$JOBS" "$JOBS.pending-receipt-$(date +%s)" 2>/dev/null;;
@@ -423,7 +445,20 @@ recover_turns() {
     [ -d "$td" ] || continue
     m="${td}manifest.json"
     [ -f "$m" ] || continue
-    [ -f "${td}result.json" ] && continue
+    TURN_EPOCH=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("session_epoch","legacy"))' "$m" 2>/dev/null) || continue
+    [ "$TURN_EPOCH" = "$(python3 "$RUNTIME_SUPPORT" epoch)" ] || continue
+    if [ -f "${td}result.json" ]; then
+      RS=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status",""))' "${td}result.json" 2>/dev/null)
+      if [ "$RS" = "succeeded" ] || [ "$RS" = "recovered-orphan" ]; then
+        [ -f "${td}steer-published.list" ] && {
+          python3 "$RUNTIME_SUPPORT" delivery delivered "${td}steer-published.list" "$(basename "$td")"
+          steer_archive_consumed "${td}steer-published.list"
+        }
+        [ -f "${td}job-batch.list" ] && mark_receipts_consumed "${td}job-batch.list"
+      fi
+      [ -n "$RS" ] && continue
+      mv "${td}result.json" "${td}result.corrupt-$(date +%s%N).json"
+    fi
     st=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("status",""))' "$m" 2>/dev/null) || continue
     case "$st" in dispatched|running|adopted) ;; *) continue;; esac
     ej="${td}engine.json"   # adapter/engine 身份在 engine.json（adapter 写），不在 manifest
@@ -432,20 +467,25 @@ recover_turns() {
     if [ -n "$apid" ] && kill -0 "$apid" 2>/dev/null && [ "$(pid_start "$apid" 2>/dev/null)" = "$ast" ]; then
       log "发现未结算轮 $td——adapter 存活，接管观察不重启"
       set_status "WAITING_JOB|adopt-turn"
-      while kill -0 "$apid" 2>/dev/null && [ ! -f "${td}result.json" ]; do sleep "$POLL"; done
+      while pid_live_identity "$apid" "$ast" && [ ! -f "${td}result.json" ]; do sleep "$POLL"; done
     fi
     epid=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("pid_engine",""))' "$ej" 2>/dev/null || echo "")
     est=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("pid_engine_start",""))' "$ej" 2>/dev/null || echo "")
     if [ -n "$epid" ] && kill -0 "$epid" 2>/dev/null && [ "$(pid_start "$epid" 2>/dev/null)" = "$est" ]; then
       log "孤儿引擎仍在跑（pid=$epid）——等待结束后回收结果，不重启"
       set_status "WAITING_JOB|orphan-engine-$epid"
-      while kill -0 "$epid" 2>/dev/null; do sleep "$POLL"; done
+      while pid_live_identity "$epid" "$est"; do sleep "$POLL"; done
     fi
     log "回收未结算轮 $td（幂等结算孤儿输出，不重跑实验）"
     set_status "RUNNING|recover-turn"
     if ! bash "$AUTOLOOP" --recover "$PROJ" "$td" >> "$RUNLOG" 2>&1; then
       log "回收失败（$td）——保留现场待人查"
     else
+      [ -f "${td}steer-published.list" ] && {
+        python3 "$RUNTIME_SUPPORT" delivery delivered "${td}steer-published.list" "$(basename "$td")"
+        steer_archive_consumed "${td}steer-published.list"
+      }
+      [ -f "${td}job-batch.list" ] && mark_receipts_consumed "${td}job-batch.list"
       python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["status"]="settled"; json.dump(d, open(p,"w"), indent=1)' "$m" 2>/dev/null
     fi
   done
@@ -464,6 +504,7 @@ begin_turn() {  # 设置全局 TD/TURN_ID，写 manifest 骨架；导出给 adap
 import json, os, socket, sys, time
 td, tid, proj, cpid = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
 man = {"schema_version": 1, "schema": "lemvo-turn-manifest",
+       "session_epoch": open(".lemvo-session-epoch").read().strip() if os.path.exists(".lemvo-session-epoch") else "legacy",
        "campaign_id": socket.gethostname() + ":" + os.path.basename(os.path.realpath(proj)),
        "turn_id": tid, "host": socket.gethostname(),
        "controller_pid": cpid,
@@ -474,6 +515,7 @@ json.dump(man, open(os.path.join(td, "manifest.json"), "w"), indent=1)
 PYM
 }
 confirm_turn() {  # 本批成功后：归档 steer、确认回执、合并 job/steer 引用、settled
+  [ -n "${MSG_FILE:-}" ] && python3 "$RUNTIME_SUPPORT" delivery delivered "$MSG_FILE.slist" "${TURN_ID:-}"
   [ -n "${MSG_FILE:-}" ] && { steer_archive_consumed "$MSG_FILE.slist"; mark_receipts_consumed "$MSG_FILE.rlist"; }
   if [ -n "${TD:-}" ] && [ -f "$TD/result.json" ]; then
     python3 - "$TD" <<'PYC2'
@@ -491,7 +533,10 @@ if os.path.exists(td + "/steer-published.list"):
     steers = [os.path.basename(l.strip()) for l in open(td + "/steer-published.list") if l.strip()]
 if jobs: r["job_ids"] = jobs
 if steers: r["steer_ids"] = steers
-json.dump(r, open(os.path.join(td, "result.json"), "w"), indent=1)
+target=os.path.join(td, "result.json")
+tmp=target+".tmp-%d"%os.getpid()
+json.dump(r, open(tmp, "w"), indent=1)
+os.replace(tmp,target)
 PYC2
   fi
   [ -n "${TD:-}" ] && [ -f "$TD/manifest.json" ] && \
@@ -516,6 +561,7 @@ assemble_step_message() {  # 设置 MSG_FILE（可空）与 TD 引用清单
     cp "$MSG_FILE" "$TD/input.md"
     [ -s "$MSG_FILE.rlist" ] && cp "$MSG_FILE.rlist" "$TD/job-batch.list"
     [ -s "$MSG_FILE.slist" ] && cp "$MSG_FILE.slist" "$TD/steer-published.list"
+    python3 "$RUNTIME_SUPPORT" delivery submitted "$MSG_FILE.slist" "${TURN_ID:-}"
   fi
 }
 dispatch_step() {  # 派发单轮；捕获引擎 stdout 解析结构化 reason；rc 透传
@@ -538,16 +584,30 @@ dispatch_step() {  # 派发单轮；捕获引擎 stdout 解析结构化 reason�
 # ── purge（BUG-3 救援：毒会话/空转后的干净重启点；不重置预算与产物）──
 if [ "$CMD" = "purge" ]; then
   if owner_alive; then
-    echo "owner 仍活跃（pid=$(owner_pid)）——先正常停止控制器（kill $(owner_pid)）再 purge"; exit 1
+    if [ "${3:-}" != "--stop-runtime" ]; then
+      echo "owner active; use purge --stop-runtime for an explicit reset (training is preserved)"; exit 1
+    fi
+    OPID="$(owner_pid)"; OST="$(pid_start "$OPID")"
+    kill "$OPID" || exit 1
+    for _ in $(seq 1 100); do
+      [ "$(pid_start "$OPID")" != "$OST" ] && break
+      sleep .1
+    done
+    if owner_alive; then echo "Owner did not stop; no archive performed."; exit 1; fi
   fi
-  TS=$(date -u +%Y%m%dT%H%M%SZ)
+  owner_take || { echo "Reset could not acquire owner lock."; exit 1; }
+  trap owner_release EXIT
+  python3 "$RUNTIME_SUPPORT" new-epoch || exit 4
+  TS=$(date -u +%Y%m%dT%H%M%S%NZ)
   ARC="poisoned-archive-$TS"
   # 在飞 adapter/engine：按 engine.json 的 pid+starttime 核验后才杀（防误杀）
   TA=.autoloop-turn-active
+  RESET_PIDS=()
   if [ -f "$TA" ]; then
     APID=$(cut -d'|' -f2 "$TA"); AST=$(cut -d'|' -f3 "$TA")
     if [ -n "$APID" ] && kill -0 "$APID" 2>/dev/null && [ "$(pid_start "$APID" 2>/dev/null)" = "$AST" ]; then
       kill "$APID" 2>/dev/null && echo "已终止在飞 adapter pid=$APID（身份核验通过）"
+      RESET_PIDS+=("$APID:$AST")
     fi
   fi
   for TD in turns/*/; do
@@ -560,8 +620,19 @@ except Exception: print("");print("")' "$EJ" 2>/dev/null)
     EPID=$(printf '%s\n' "$EP" | sed -n 1p); EPST=$(printf '%s\n' "$EP" | sed -n 2p)
     if [ -n "$EPID" ] && kill -0 "$EPID" 2>/dev/null && [ "$(pid_start "$EPID" 2>/dev/null)" = "$EPST" ]; then
       kill "$EPID" 2>/dev/null && echo "已终止孤儿引擎 pid=$EPID（身份核验通过）"
+      RESET_PIDS+=("$EPID:$EPST")
     fi
   done
+  # Never move paths while a verified old writer is still alive.
+  for _ in $(seq 1 100); do
+    WRITERS_ALIVE=0
+    for IDENTITY in "${RESET_PIDS[@]}"; do
+      pid_live_identity "${IDENTITY%%:*}" "${IDENTITY#*:}" && WRITERS_ALIVE=1
+    done
+    [ "$WRITERS_ALIVE" -eq 0 ] && break
+    sleep .1
+  done
+  if [ "$WRITERS_ALIVE" -ne 0 ]; then echo "Runtime writer still alive; reset fenced but evidence not moved."; exit 1; fi
   mkdir -p "$ARC"
   for X in turns .lemvo-receipts .autoloop-session-id .autoloop-summary.md \
            .autoloop-stall-count .autoloop-poison-count .autoloop-turn-active .autoloop-engine.pid; do
@@ -598,6 +669,7 @@ if [ "$CMD" = "advance" ]; then
     say "上一轮仍在途（turn-active/engine pid 在）——不并行推进"; exit 0
   fi
   TURN=0; TURN_ID=""; TD=""
+  export LEMVO_RESOURCE_WAKE=user-advance
   begin_turn
   assemble_step_message
   dispatch_step; rc=$?
@@ -607,7 +679,7 @@ fi
 [ "$CMD" = "start" ] || usage
 shift 2   # start/resume 语义相同（--resume 兼容旧调用，在剩余参数中忽略）
 
-MAX_TURNS="$MAX_TURNS_DEFAULT"; ENGINE=""; MODE_ARG=""
+MAX_TURNS="$MAX_TURNS_DEFAULT"; ENGINE=""; MODE_ARG=""; DELEGATION=""
 # r29: 取值参数必须带值——缺值立即 rc64 用法错误，避免解析死循环
 need_value() { [ $# -ge 2 ] && [ -n "$2" ] && case "$2" in --*) return 1;; *) return 0;; esac; return 1; }
 while [ $# -gt 0 ]; do
@@ -615,6 +687,7 @@ while [ $# -gt 0 ]; do
     --engine) need_value "$@" || { echo "用法错误: --engine 缺少值"; exit 64; }; ENGINE="$2"; shift 2;;
     --max-turns) need_value "$@" || { echo "用法错误: --max-turns 缺少值"; exit 64; }; MAX_TURNS="$2"; shift 2;;
     --mode) need_value "$@" || { echo "用法错误: --mode 缺少值（guided|unattended）"; exit 64; }; MODE_ARG="$2"; shift 2;;
+    --delegation) need_value "$@" || exit 64; DELEGATION="$2"; case "$DELEGATION" in auto|inline) ;; *) exit 64;; esac; shift 2;;
     --resume) shift;;
     *) shift;;
   esac
@@ -626,6 +699,18 @@ export LEMVO_RC_MODE=structured
 owner_take || { echo "已有活跃控制器（pid=$(owner_pid)）或锁初始化中——本进程不另开循环"; exit 0; }
 trap owner_release EXIT
 mkdir -p "$QUEUE" "$ARCHIVE" "$RECEIPTS" "$TURNSD"
+[ -n "$DELEGATION" ] && echo "$DELEGATION" > .lemvo-delegation
+python3 "$RUNTIME_SUPPORT" doctor "$0" > .lemvo-takeover-inventory.json
+python3 - <<'PYINV'
+import json
+report=json.load(open('.lemvo-takeover-inventory.json'))
+candidates=report.get('legacy_candidates', [])
+if candidates:
+    print('Takeover notice: project-associated legacy automation PIDs=%s; inspect .lemvo-takeover-inventory.json (not terminated).' % ','.join(str(c['pid']) for c in candidates))
+drift=[c for c in report.get('installed_candidates',[]) if not c['matches_invoked']]
+if drift:
+    print('Runtime version notice: invoked script differs from installed candidates; use doctor before a controlled migration.')
+PYINV
 
 [ -n "$ENGINE" ] && echo "$ENGINE" > "$ENGINE_F"
 export ENGINE="$(engine_now)"
@@ -651,6 +736,7 @@ recover_turns
 TURN=0; FAILS=0; PROTO_NOSID=0
 echo 0 > .lemvo-turn-count
 while :; do
+  unset LEMVO_RESOURCE_WAKE
   # 模式与终态
   [ -f CAMPAIGN-DONE ] && { set_status "COMPLETED|campaign-done"; log "项目已完成——退出（不重开终态）"; exit 0; }
   TURN=$((TURN + 1)); echo "$TURN" > .lemvo-turn-count
@@ -661,12 +747,16 @@ while :; do
 
   # C5：每轮先对账（活作业与未消费回执优先，不先调模型）
   stamp_jobs_started
-  ST=$(jobs_reconcile_once)
+  ST=$(jobs_reconcile_once) || ST=CORRUPT
   case "$ST" in
     PENDING*)
       # C2：等待作业期间同样读取模式请求（切 guided 则转等人态）
       if [ "$(mode_now)" = "guided" ]; then set_status "WAITING_USER|jobs-running"; else set_status "WAITING_JOB|${ST#PENDING }"; fi
-      sleep "$POLL"; TURN=$((TURN - 1)); continue;;
+      if compgen -G "$QUEUE/q-*.md" >/dev/null && { [ "$(mode_now)" = "unattended" ] || [ -f "$REQ_ADV" ]; }; then
+        export LEMVO_RESOURCE_WAKE=guidance-while-jobs-running
+      else
+        sleep "$POLL"; TURN=$((TURN - 1)); continue
+      fi;;
     TIMEOUT)
       write_receipts timeout; log "作业超时——回执保留身份，唤醒引擎处理（未删登记）"
       mv "$JOBS" "$JOBS.pending-receipt-$(date +%s)" 2>/dev/null;;
@@ -689,6 +779,7 @@ while :; do
   if [ "$(mode_now)" = "guided" ]; then
     if [ -f "$REQ_ADV" ]; then
       rm -f "$REQ_ADV"; set_status "RUNNING|advance-request"
+      export LEMVO_RESOURCE_WAKE=user-advance
     else
       set_status "WAITING_USER|guided-idle"; sleep "$POLL"; TURN=$((TURN - 1)); continue
     fi
@@ -698,6 +789,17 @@ while :; do
   if turn_inflight; then
     set_status "WAITING_JOB|engine-inflight-$(cat .autoloop-turn-active 2>/dev/null | cut -d'|' -f1)"
     sleep "$POLL"; TURN=$((TURN - 1)); continue
+  fi
+
+  # Resource waiting is a polling state, not a permanent pre-dispatch veto.
+  # No turn manifests or model calls are created for ordinary waiting ticks.
+  if [ -z "${LEMVO_RESOURCE_WAKE:-}" ]; then
+    WAKE=$(python3 "$RUNTIME_SUPPORT" wait-check WAITING_RESOURCE) || { set_status "BLOCKED|wait-state-error"; exit 4; }
+    if [ "$WAKE" = "wait" ]; then
+      set_status "WAITING_JOB|waiting-resource"
+      sleep "$POLL"; TURN=$((TURN - 1)); continue
+    fi
+    [ "$WAKE" != "ready" ] && export LEMVO_RESOURCE_WAKE="$WAKE"
   fi
 
   begin_turn

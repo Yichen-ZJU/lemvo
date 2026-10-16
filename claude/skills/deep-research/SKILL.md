@@ -12,6 +12,18 @@ Run a thorough, source-heavy investigation on the user's topic and produce a dur
 
 This is an execution request, not a request to explain or implement the workflow instructions. Execute the workflow. Do not answer by describing the protocol. Your first actions should be tool calls that create directories and write the plan artifact.
 
+## Dispatch preference
+
+Read the project's `.lemvo-delegation` before assigning work. `inline` means
+the lead executes the planned research angles sequentially, saves each evidence
+file, then performs citation checking and review itself. This explicit setting
+overrides the parallel-spawn examples below, including verifier/reviewer dispatch;
+it does not remove the evidence checks or create an additional approval step.
+Record that review was lead-performed, not independent. In `auto` or when the
+file is absent, use the scale decision below; subagents are optional when direct
+work is sufficient. If child dispatch produces no usable progress, preserve any
+partial output and continue inline rather than repeatedly spawning the same work.
+
 ## Tools (Claude Code)
 
 **论文检索后端（优先级 + 自动降级，探测结果记入 provenance）：**
