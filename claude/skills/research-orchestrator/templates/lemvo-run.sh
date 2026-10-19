@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lemvo-run v4 — 可唤醒等待、指导投递凭据、会话代际重置与接管清单（2026-10-17）
+# lemvo-run v5 — bounded recovery/snapshots, observable waits (2026-10-19)
 #  C1 原子 owner 锁：锁目录在临时目录完整初始化后原子 rename 发布（不存在
 #     "mkdir 成功但 PID 未写完"窗口）；缺/坏 PID 一律不判死 owner（宽限期内
 #     等待，超宽限才隔离）；退出清理核对锁身份，绝不误删他人锁；PID 复用
@@ -178,6 +178,13 @@ enqueue_steer() {  # $1=内容来源文件（只读复制） $2=标签；输出�
 case "$CMD" in
   doctor)
     python3 "$RUNTIME_SUPPORT" doctor "$0"; exit $?;;
+  repair-prep)
+    [ -n "${3:-}" ] && [ -n "${4:-}" ] || { echo 'repair-prep <project> <incident-archive> <reason> [--apply]'; exit 64; }
+    python3 "$RUNTIME_SUPPORT" repair-prep "$3" "$4" "${5:-}"; exit $?;;
+  retry-recovery)
+    [ -n "${3:-}" ] || exit 64
+    owner_alive && { echo 'Stop the controller before retrying a reviewed historical turn.'; exit 1; }
+    python3 "$RUNTIME_SUPPORT" recovery-mark "$3" pending operator-retry; exit $?;;
   delegation)
     case "${3:-}" in auto|inline) echo "$3" > .lemvo-delegation;; *) echo "delegation: auto|inline"; exit 64;; esac
     say "delegation=$3 (effective at the next turn; running experiments continue)"; exit 0;;
@@ -439,57 +446,33 @@ reconcile_gate() {
 
 # ── 未结算轮恢复（C5/R2/R3：接管观察 → 孤儿回收 → 幂等结算，不重跑实验）──
 recover_turns() {
-  local td m st apid ast epid est
+  local td action plan needs_more=0
   [ -d "$TURNSD" ] || return 0
-  for td in "$TURNSD"/*/; do
-    [ -d "$td" ] || continue
-    m="${td}manifest.json"
-    [ -f "$m" ] || continue
-    TURN_EPOCH=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("session_epoch","legacy"))' "$m" 2>/dev/null) || continue
-    [ "$TURN_EPOCH" = "$(python3 "$RUNTIME_SUPPORT" epoch)" ] || continue
-    if [ -f "${td}result.json" ]; then
-      RS=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status",""))' "${td}result.json" 2>/dev/null)
-      if [ "$RS" = "succeeded" ] || [ "$RS" = "recovered-orphan" ]; then
-        [ -f "${td}steer-published.list" ] && {
-          python3 "$RUNTIME_SUPPORT" delivery delivered "${td}steer-published.list" "$(basename "$td")"
-          steer_archive_consumed "${td}steer-published.list"
-        }
-        [ -f "${td}job-batch.list" ] && mark_receipts_consumed "${td}job-batch.list"
-      fi
-      [ -n "$RS" ] && continue
-      mv "${td}result.json" "${td}result.corrupt-$(date +%s%N).json"
-    fi
-    st=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("status",""))' "$m" 2>/dev/null) || continue
-    case "$st" in dispatched|running|adopted) ;; *) continue;; esac
-    ej="${td}engine.json"   # adapter/engine 身份在 engine.json（adapter 写），不在 manifest
-    apid=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("adapter_pid",""))' "$ej" 2>/dev/null || echo "")
-    ast=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("adapter_start",""))' "$ej" 2>/dev/null || echo "")
-    if [ -n "$apid" ] && kill -0 "$apid" 2>/dev/null && [ "$(pid_start "$apid" 2>/dev/null)" = "$ast" ]; then
-      log "发现未结算轮 $td——adapter 存活，接管观察不重启"
-      set_status "WAITING_JOB|adopt-turn"
-      while pid_live_identity "$apid" "$ast" && [ ! -f "${td}result.json" ]; do sleep "$POLL"; done
-    fi
-    epid=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("pid_engine",""))' "$ej" 2>/dev/null || echo "")
-    est=$(python3 -c 'import json,sys;print(json.load(open(sys.argv[1])).get("pid_engine_start",""))' "$ej" 2>/dev/null || echo "")
-    if [ -n "$epid" ] && kill -0 "$epid" 2>/dev/null && [ "$(pid_start "$epid" 2>/dev/null)" = "$est" ]; then
-      log "孤儿引擎仍在跑（pid=$epid）——等待结束后回收结果，不重启"
-      set_status "WAITING_JOB|orphan-engine-$epid"
-      while pid_live_identity "$epid" "$est"; do sleep "$POLL"; done
-    fi
-    log "回收未结算轮 $td（幂等结算孤儿输出，不重跑实验）"
-    set_status "RUNNING|recover-turn"
-    if ! bash "$AUTOLOOP" --recover "$PROJ" "$td" >> "$RUNLOG" 2>&1; then
-      log "回收失败（$td）——保留现场待人查"
-    else
-      [ -f "${td}steer-published.list" ] && {
-        python3 "$RUNTIME_SUPPORT" delivery delivered "${td}steer-published.list" "$(basename "$td")"
-        steer_archive_consumed "${td}steer-published.list"
+  plan=$(mktemp)
+  LEMVO_RECOVERY_OWNER=$$ python3 "$RUNTIME_SUPPORT" recovery-plan > "$plan" || { rm -f "$plan"; return 1; }
+  while IFS='|' read -r action td; do
+    case "$action" in
+      wait) set_status "WAITING_JOB|adopt-turn"; rm -f "$plan"; return 1;;
+      more) needs_more=1; continue;;
+      recover)
+        log "回收未结算轮 $td（单次尝试，不重跑实验）"
+        if ! timeout "${LEMVO_RECOVERY_CALL_SEC:-30}" bash "$AUTOLOOP" --recover "$PROJ" "$td" >> "$RUNLOG" 2>&1; then
+          python3 "$RUNTIME_SUPPORT" recovery-mark "$td" needs-review recover-failed-or-timeout
+          log "回收失败：$td 已标 needs-review，不在每次启动重试；证据保留"
+          continue
+        fi;;
+      ack) :;;
+      *) continue;;
+    esac
+    [ -f "$td/steer-published.list" ] && {
+        python3 "$RUNTIME_SUPPORT" delivery delivered "$td/steer-published.list" "$(basename "$td")"
+        steer_archive_consumed "$td/steer-published.list"
       }
-      [ -f "${td}job-batch.list" ] && mark_receipts_consumed "${td}job-batch.list"
-      python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["status"]="settled"; json.dump(d, open(p,"w"), indent=1)' "$m" 2>/dev/null
-    fi
-  done
-  return 0
+    [ -f "$td/job-batch.list" ] && mark_receipts_consumed "$td/job-batch.list"
+    python3 "$RUNTIME_SUPPORT" recovery-mark "$td" settled confirmed
+  done < "$plan"
+  rm -f "$plan"
+  [ "$needs_more" -eq 0 ]
 }
 
 # ── turn 目录与清单（持久 turn manifest，R1-R3 + 结果闭环）──
@@ -513,6 +496,7 @@ man = {"schema_version": 1, "schema": "lemvo-turn-manifest",
        "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
 json.dump(man, open(os.path.join(td, "manifest.json"), "w"), indent=1)
 PYM
+  python3 "$RUNTIME_SUPPORT" turn-register "$TD" || return 4
 }
 confirm_turn() {  # 本批成功后：归档 steer、确认回执、合并 job/steer 引用、settled
   [ -n "${MSG_FILE:-}" ] && python3 "$RUNTIME_SUPPORT" delivery delivered "$MSG_FILE.slist" "${TURN_ID:-}"
@@ -541,6 +525,7 @@ PYC2
   fi
   [ -n "${TD:-}" ] && [ -f "$TD/manifest.json" ] && \
     python3 -c 'import json,sys; p=sys.argv[1]+"/manifest.json"; d=json.load(open(p)); d["status"]="settled"; json.dump(d, open(p,"w"), indent=1)' "$TD" 2>/dev/null
+  [ -n "${TD:-}" ] && python3 "$RUNTIME_SUPPORT" recovery-mark "$TD" settled confirmed
 }
 
 # ── E1：共用 step —— 组装本批 steer+回执（advance 与主循环同一路径）──
@@ -634,7 +619,7 @@ except Exception: print("");print("")' "$EJ" 2>/dev/null)
   done
   if [ "$WRITERS_ALIVE" -ne 0 ]; then echo "Runtime writer still alive; reset fenced but evidence not moved."; exit 1; fi
   mkdir -p "$ARC"
-  for X in turns .lemvo-receipts .autoloop-session-id .autoloop-summary.md \
+  for X in turns .lemvo-recovery.sqlite3 .lemvo-receipts .autoloop-session-id .autoloop-summary.md \
            .autoloop-stall-count .autoloop-poison-count .autoloop-turn-active .autoloop-engine.pid; do
     [ -e "$X" ] && mv "$X" "$ARC/"
   done
@@ -643,7 +628,7 @@ except Exception: print("");print("")' "$EJ" 2>/dev/null)
   printf '{"type":"purge","ts":"%s","archive":"%s","note":"session/turns archived; budget & state kept"}\n' \
     "$TS" "$ARC" >> .autoloop-prep-ledger.jsonl 2>/dev/null || true
   echo "$(date -u +%FT%TZ) purge → $ARC（SID/轮证据/计数归档；STATE 与预算未动）" >> campaign_log.txt 2>/dev/null || true
-  echo "purge 完成：$ARC（重启前建议检查 ledger 中 session-poisoned 记录与 config 预检）"
+  echo "purge 完成：$ARC；purge 事件在 .autoloop-prep-ledger.jsonl（不自动生成 session-poisoned 事件，准备计数未重置）"
   exit 0
 fi
 
@@ -662,7 +647,7 @@ if [ "$CMD" = "advance" ]; then
   mkdir -p "$QUEUE" "$RECEIPTS" "$ARCHIVE"
   # 附带P2：指导先入队，再对账——活作业时消息不丢、返回等待
   if [ -n "$MSG" ] && [ -f "$MSG" ]; then enqueue_steer "$MSG" "adv" >/dev/null; MSG=""; fi
-  recover_turns
+  recover_turns || { set_status "WAITING_JOB|recovery-pending"; exit 0; }
   reconcile_gate || { set_status "WAITING_JOB|advance-reconcile"; exit 0; }
   if turn_inflight; then
     set_status "WAITING_JOB|engine-inflight-advance"
@@ -670,10 +655,11 @@ if [ "$CMD" = "advance" ]; then
   fi
   TURN=0; TURN_ID=""; TD=""
   export LEMVO_RESOURCE_WAKE=user-advance
-  begin_turn
+  begin_turn || exit 4
   assemble_step_message
   dispatch_step; rc=$?
   [ $rc -eq 0 ] && confirm_turn
+  if [ $rc -eq 7 ]; then python3 "$RUNTIME_SUPPORT" preflight-close "$TD" WAITING_RESOURCE; python3 "$RUNTIME_SUPPORT" wait-register; fi
   exit $rc
 fi
 [ "$CMD" = "start" ] || usage
@@ -701,6 +687,7 @@ trap owner_release EXIT
 mkdir -p "$QUEUE" "$ARCHIVE" "$RECEIPTS" "$TURNSD"
 [ -n "$DELEGATION" ] && echo "$DELEGATION" > .lemvo-delegation
 python3 "$RUNTIME_SUPPORT" doctor "$0" > .lemvo-takeover-inventory.json
+cp .lemvo-takeover-inventory.json .lemvo-runtime-at-start.json
 python3 - <<'PYINV'
 import json
 report=json.load(open('.lemvo-takeover-inventory.json'))
@@ -731,7 +718,23 @@ fi
 log "=== 控制器启动：engine=$ENGINE max-turns=$MAX_TURNS mode=$(mode_now) pid=$$ host=$(hostname 2>/dev/null || echo unknown) ==="
 
 # ── C5：启动先对账——未结算轮恢复优先，活作业等待，不重跑实验 ──
-recover_turns
+recover_turns || true
+
+wait_pause() {
+  local duration start now
+  duration=$(python3 -c 'import json; print(json.load(open(".lemvo-resource-wait.json")).get("poll_sec",15))' 2>/dev/null || echo "$POLL")
+  log "WAITING_RESOURCE poll_after=${duration}s (no model/turn)"
+  start=$SECONDS
+  while :; do
+    sleep "$POLL"
+    [ -f "$REQ_ADV" ] || [ "$(mode_now)" = guided ] || compgen -G "$QUEUE/q-*.md" >/dev/null && break
+    [ -f STOP ] || [ -f HOLD ] || [ -f CAMPAIGN-DONE ] || [ -f BLOCKED-USER ] && break
+    now=$((SECONDS-start))
+    awk -v n="$now" -v d="$duration" 'BEGIN {exit !(n>=d)}' && break
+    # Accelerated CPU tests use subsecond polls; normal production uses 15 s slices.
+    awk -v d="$duration" 'BEGIN {exit !(d<1)}' && break
+  done
+}
 
 TURN=0; FAILS=0; PROTO_NOSID=0
 echo 0 > .lemvo-turn-count
@@ -744,6 +747,10 @@ while :; do
   # 无产物也绝不记 COMPLETED（COMPLETED 只留给引擎报告的 campaign-done）。
   # 续跑：再次 start/advance 即可（轮数重新计数，状态/预算保留）。
   [ "$TURN" -gt "$MAX_TURNS" ] && { set_status "PAUSED|max-turns"; log "max-turns 到达——运行器暂停（课题未声明完成；续跑请再 start/advance）"; exit 0; }
+
+  if ! recover_turns; then
+    set_status "WAITING_JOB|recovery-pending"; sleep "$POLL"; TURN=$((TURN - 1)); continue
+  fi
 
   # C5：每轮先对账（活作业与未消费回执优先，不先调模型）
   stamp_jobs_started
@@ -797,12 +804,12 @@ while :; do
     WAKE=$(python3 "$RUNTIME_SUPPORT" wait-check WAITING_RESOURCE) || { set_status "BLOCKED|wait-state-error"; exit 4; }
     if [ "$WAKE" = "wait" ]; then
       set_status "WAITING_JOB|waiting-resource"
-      sleep "$POLL"; TURN=$((TURN - 1)); continue
+      wait_pause; TURN=$((TURN - 1)); continue
     fi
     [ "$WAKE" != "ready" ] && export LEMVO_RESOURCE_WAKE="$WAKE"
   fi
 
-  begin_turn
+  begin_turn || exit 4
   assemble_step_message
   dispatch_step; rc=$?
 
@@ -822,7 +829,9 @@ while :; do
          *BLOCKED*) set_status "BLOCKED|blocked-user(${REASON})"; log "引擎阻塞态（$REASON）——按原因转 BLOCKED，长等待不空转"; sleep 600; TURN=$((TURN - 1)); continue;;
          *) set_status "WAITING_USER|blocked-state(${REASON:-HOLD})"; log "阻塞态（${REASON:-HOLD}）——转 WAITING_USER 长等待"; sleep 300; TURN=$((TURN - 1)); continue;;
        esac;;
-    7) set_status "WAITING_JOB|waiting-resource"; sleep "$POLL"; TURN=$((TURN - 1)); continue;;
+    7) python3 "$RUNTIME_SUPPORT" preflight-close "$TD" WAITING_RESOURCE
+       python3 "$RUNTIME_SUPPORT" wait-register
+       set_status "WAITING_JOB|waiting-resource"; sleep "$POLL"; TURN=$((TURN - 1)); continue;;
     8) set_status "RUNNING|service-error-backoff"; FAILS=$((FAILS + 1))
        [ "$FAILS" -ge "$ENGINE_FAIL_MAX" ] && { set_status "BLOCKED|service-errors"; log "服务类错误连续 $FAILS 次——退出待人"; exit 8; }
        log "服务类错误（rc=8，SID 保留）——退避 120s 重试"; sleep 120; TURN=$((TURN - 1)); continue;;

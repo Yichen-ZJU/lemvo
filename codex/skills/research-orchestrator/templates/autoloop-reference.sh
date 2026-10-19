@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 单轮适配器 v4.10：初始化/可唤醒等待/终态协议/会话代际隔离（2026-10-17）
+# 单轮适配器 v4.11：有界检查/增量恢复/资源等待与研究停滞分离（2026-10-19）
 #  v4.8 变更（对 v4.7，均带隔离回归）：
 #  费用政策（用户决定 2026-10-14）：USD 费用默认只统计、不停止、不缩实验、
 #    不否定方向；金额停止门仅当 budget.cap_authorized: yes（真实用户明确授权、
@@ -67,7 +67,7 @@
 set -uo pipefail
 # One version source: write_helper emits this marker into the generated Python.
 # Bump on helper changes so existing project-local helpers migrate exactly once.
-HELPER_VERSION="4.10"
+HELPER_VERSION="4.11"
 RUNTIME_SUPPORT="$(cd "$(dirname "$0")" && pwd)/runtime-support.py"
 [ -f "$RUNTIME_SUPPORT" ] || { echo "Missing runtime-support.py: install the complete research-orchestrator skill."; exit 64; }
 
@@ -633,7 +633,9 @@ def cmd_settle():
         total_turns = int(total.get("total_turns", "0"))
     except (TypeError, ValueError):
         total_turns = 0
-    turns = 0 if new_progress else turns + 1
+    inspection_unknown = (os.environ.get("LEMVO_PROGRESS_INCOMPLETE") == "yes"
+                          or os.environ.get("LEMVO_WAIT_ASSESSMENT") == "yes")
+    turns = 0 if new_progress else (turns if inspection_unknown else turns + 1)
     total_turns += 1
     LINES = open(STATE, encoding="utf-8").read().splitlines()
     set_in("prep", "prep_turns", turns)
@@ -846,8 +848,16 @@ def cmd_auth_json():
     """S3：授权事件真序列化（justification 经环境变量传入）。"""
     just = os.environ.get("AUTHORIZE_JUSTIFICATION", "")
     obj = {"type": "authorize", "new_cap": int(sys.argv[2]),
-           "justification": just, "ts": sys.argv[3]}
+           "justification": just, "request_id":os.environ.get("AUTHORIZE_REQUEST_ID", ""), "ts": sys.argv[3]}
     print(json.dumps(obj, ensure_ascii=False))
+
+def cmd_auth_available():
+    just=os.environ.get("AUTHORIZE_JUSTIFICATION", "")
+    request=os.environ.get("AUTHORIZE_REQUEST_ID", "")
+    used=any(ev.get("type")=="authorize" and
+             ((request and ev.get("request_id")==request) or
+              (not request and ev.get("justification")==just)) for ev in ledger_events())
+    print("yes" if just and not used else "no")
 
 def cmd_ledger_append():
     obj = json.loads(sys.stdin.read())
@@ -888,6 +898,7 @@ if __name__ == "__main__":
     elif cmd == "cost-delta": cmd_cost_delta()
     elif cmd == "prep-snapshot": cmd_prep_snapshot()
     elif cmd == "auth-json": cmd_auth_json()
+    elif cmd == "auth-available": cmd_auth_available()
     elif cmd == "ledger-append": cmd_ledger_append()
     elif cmd == "resume-fails": cmd_resume_fails()
     elif cmd == "last-authorize-cap": cmd_last_authorize_cap()
@@ -1147,7 +1158,7 @@ over_budget() {
   emit_reason "OVER_BUDGET"
   cat <<MSG
 超预算决策选项（任选其一，全部留痕）：
-  A) 继续：AUTHORIZE_JUSTIFICATION='<新增益预期>' 重跑本脚本（上限 +10，记 authorize 事件）
+  A) 继续：AUTHORIZE_JUSTIFICATION='<新增益预期>' 重跑（一次性续行 +10；新授权可加 AUTHORIZE_REQUEST_ID）
   B) 收窄：修改 $STATE 的 scope/ready_blocker 后，AUTHORIZE_JUSTIFICATION='<收窄说明>' 重跑
   C) 终止：touch CAMPAIGN-DONE（交付当前状态；准备耗尽 != 方向被证伪，记 untested）
   D) 用户显式重置：编辑 $STATE 对应计数字段（须在 research-log 留一句重置理由）
@@ -1163,11 +1174,14 @@ PYOB
   exit 2
 }
 if [ "$PREP_TURNS" -ge "$EFFECTIVE_CAP" ]; then
-  if [ -n "${AUTHORIZE_JUSTIFICATION:-}" ]; then
+  if [ "$(python3 "$HELPER" auth-available)" = "yes" ]; then
     AUTH=$(mktemp)
-    python3 "$HELPER" auth-json "$((EFFECTIVE_CAP + 10))" "$(date -u +%FT%TZ)" > "$AUTH" || { rm -f "$AUTH"; say "授权序列化失败"; emit_reason "ACCOUNTING"; exit 5; }
+    OLD_CAP="$EFFECTIVE_CAP"
+    [ "$PREP_TURNS" -gt "$EFFECTIVE_CAP" ] && EFFECTIVE_CAP="$PREP_TURNS"
+    EFFECTIVE_CAP=$((EFFECTIVE_CAP + 10))
+    python3 "$HELPER" auth-json "$EFFECTIVE_CAP" "$(date -u +%FT%TZ)" > "$AUTH" || { rm -f "$AUTH"; say "授权序列化失败"; emit_reason "ACCOUNTING"; exit 5; }
     if helper ledger-append < "$AUTH"; then
-      say "授权续行已记账（上限 $EFFECTIVE_CAP → $((EFFECTIVE_CAP + 10))）：$AUTHORIZE_JUSTIFICATION"
+      say "一次性授权续行已记账（上限 $OLD_CAP → $EFFECTIVE_CAP）：$AUTHORIZE_JUSTIFICATION"
     else
       rm -f "$AUTH"; say "授权记账失败——拒绝在无账状态下超预算执行"; emit_reason "ACCOUNTING"; exit 5
     fi
@@ -1370,6 +1384,15 @@ fi
 # 引擎对 research-state.yaml 的真实编辑算产物）
 NEW_ARTIFACT=""
 NEW_ARTIFACT=$(python3 "$RUNTIME_SUPPORT" progress-changed "$TD/progress-before.json") || exit 4
+export LEMVO_PROGRESS_INCOMPLETE="$(python3 "$RUNTIME_SUPPORT" snapshot-incomplete "$TD/progress-before.json")"
+[ "$LEMVO_PROGRESS_INCOMPLETE" = yes ] && say "Progress inspection incomplete (bounded scan): unknown, not evidence of no research progress. Use an explicit artifact or snapshot exclusions."
+export LEMVO_WAIT_ASSESSMENT=no
+case "${LEMVO_RESOURCE_WAKE:-}" in
+  resource-recheck|wait-*)
+    if python3 "$HELPER" block-check | grep -q "WAITING='yes'"; then
+      export LEMVO_WAIT_ASSESSMENT=yes
+    fi;;
+esac
 
 # ── 6) 会话 ID 提取（claude session_id | codex thread_id | 文本三拼写）──
 NEW_SID=$( grep -h -oE '"session_id"[": ]+[a-f0-9-]{8,}' "$TD/engine-stdout.jsonl" "$TD/engine-stderr.log" 2>/dev/null | head -1 | grep -oE '[a-f0-9]{8}-[a-f0-9-]+' \
@@ -1530,6 +1553,8 @@ obj = {"type": e["T_TYPE"], "turn_id": e["T_TURNID"], "sid": e["T_SID"],
        "cost_basis": e["T_BASIS"], "cost_scope": e["T_SCOPE"],
        "codex_cum": (json.loads(e["T_CUM"]) if e.get("T_CUM") else None),
        "wall_sec": iv(e["T_WALL"]), "wall_scope": "engine-call",
+       "progress_inspection": "incomplete" if e.get("LEMVO_PROGRESS_INCOMPLETE") == "yes" else "complete",
+       "waiting_assessment": e.get("LEMVO_WAIT_ASSESSMENT") == "yes",
        "artifact_ref": e["T_ART"],
        "ts": datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ")}
 print(json.dumps(obj, ensure_ascii=False))
@@ -1552,15 +1577,15 @@ say "本轮 rc=$rc；NEW_PROGRESS=${NEW_PROGRESS:-?}（类型化凭据=${ARTIFAC
 
 # ── BUG-3：空转/毒会话检测（引擎 rc=0 也会空转——礼貌 loop 无产物无进展）──
 # NEW_ARTIFACT 已在引擎结束时判定（不含账本/控制器写入）
-if [ -z "$NEW_ARTIFACT" ] && [ "${NEW_PROGRESS:-no}" != "yes" ]; then
+if [ -z "$NEW_ARTIFACT" ] && [ "${NEW_PROGRESS:-no}" != "yes" ] && [ "${LEMVO_PROGRESS_INCOMPLETE:-no}" != yes ] && [ "${LEMVO_WAIT_ASSESSMENT:-no}" != yes ]; then
   STALL_N=$(( $(cat .autoloop-stall-count 2>/dev/null || echo 0) + 1 )); echo "$STALL_N" > .autoloop-stall-count
-else
+elif [ -n "$NEW_ARTIFACT" ] || [ "${NEW_PROGRESS:-no}" = yes ]; then
   echo 0 > .autoloop-stall-count; echo 0 > .autoloop-poison-count
 fi
 # 毒会话：连续 N 轮输出含阻塞话术且零产物 → 清 SID 强制新会话（避免 resume
 # 复读污染上下文）；短语可经 LEMVO_POISON_PHRASES 覆盖（| 分隔的 grep -E 模式）
 POISON_RE="${LEMVO_POISON_PHRASES:-只读|read.only|READY_TO_PROBE.*不满足|ready_blocker}"
-if [ -z "$NEW_ARTIFACT" ] && grep -qiE "$POISON_RE" "$TD/engine-stdout.jsonl" 2>/dev/null; then
+if [ -z "$NEW_ARTIFACT" ] && [ "${LEMVO_PROGRESS_INCOMPLETE:-no}" != yes ] && [ "${LEMVO_WAIT_ASSESSMENT:-no}" != yes ] && grep -qiE "$POISON_RE" "$TD/engine-stdout.jsonl" 2>/dev/null; then
   POISON_N=$(( $(cat .autoloop-poison-count 2>/dev/null || echo 0) + 1 )); echo "$POISON_N" > .autoloop-poison-count
   if [ "$POISON_N" -ge "${LEMVO_POISON_N:-3}" ]; then
     OLD_SID=$(cat "$SID_FILE" 2>/dev/null || true)
@@ -1572,7 +1597,7 @@ if [ -z "$NEW_ARTIFACT" ] && grep -qiE "$POISON_RE" "$TD/engine-stdout.jsonl" 2>
   fi
 fi
 # 零产物空转兜底闸门：连续 N 轮（默认 5）无任何项目产物 → 明确决策点，不礼貌空转
-if [ -z "$NEW_ARTIFACT" ] && [ "${NEW_PROGRESS:-no}" != "yes" ] && [ "${STALL_N:-0}" -ge "${LEMVO_STALL_ARTIFACT_N:-5}" ]; then
+if [ -z "$NEW_ARTIFACT" ] && [ "${NEW_PROGRESS:-no}" != "yes" ] && [ "${LEMVO_PROGRESS_INCOMPLETE:-no}" != yes ] && [ "${LEMVO_WAIT_ASSESSMENT:-no}" != yes ] && [ "${STALL_N:-0}" -ge "${LEMVO_STALL_ARTIFACT_N:-5}" ]; then
   say "连续 $STALL_N 轮零产物（引擎 rc=0 但无建设输出）——空转停滞，转决策点待人查"
   emit_reason "STALL_NO_ARTIFACT"
   SB=$(mktemp); printf '{"type":"stall-no-artifact","turn_id":"%s","turns":%d,"ts":"%s"}\n' \

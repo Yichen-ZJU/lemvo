@@ -1,5 +1,13 @@
 # CHANGELOG — codex-for-research
 
+## 2026-10-19 Bounded runtime inspection and recovery
+
+- Bound progress inspection by directory entries, bytes and time; cache content hashes and support project exclusions. Incomplete inspection is unknown, not proof of research stagnation.
+- Index pending recovery, quarantine failed recovery for explicit retry, and archive unlaunched preflight turns without consuming guidance or deleting evidence.
+- Add resource-wait backoff and optional time/process/heartbeat/memory observations. Preserve periodic reassessment; resource waiting is not a negative research verdict.
+- Keep real resource-reassessment usage in accounting without incrementing research-stall counters. Consume continuation authorization once and expose a dry-run-first, evidence-bound historical prep repair.
+- Verify the complete invoked runtime bundle, document detached operation, and add 19 deterministic CPU regression cases. No new research permission gates or GPU/model-dollar caps.
+
 ## 2026-10-17 Runtime liveness and recovery
 
 - Bootstrap machine accounting independently of the model, including caller-supplied first turns.

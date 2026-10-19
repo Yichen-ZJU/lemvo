@@ -47,6 +47,9 @@ cause an infinite wait. Unknown does not mean the experiment failed.
 controller restarts. Pending user guidance or a completed-job receipt can wake it
 earlier. Normal waiting polls use no model calls. The assessment does not grant
 new resources or permit duplicate jobs. Explicit STOP/HOLD/BLOCKED-USER still apply.
+An actual resource reassessment that remains WAITING_RESOURCE records its model
+usage and total call count, but does not count as a stagnant research/preparation
+turn. Repeated waiting is an operational condition, not a negative research result.
 
 ## Guidance delivery and long turns
 
@@ -81,6 +84,79 @@ and cumulative resource ledgers are retained. If a verified process will not sto
 reset reports failure and preserves the evidence for inspection.
 
 ## Runtime health is not a research verdict
+
+### Bounded inspection and historical recovery
+
+Progress inspection has independent I/O limits, not research/GPU limits: defaults
+are 5,000 directory entries, 64 MiB of new reads and a cooperative 2-second scan.
+These are configurable with `LEMVO_SNAPSHOT_MAX_ENTRIES`,
+`LEMVO_SNAPSHOT_MAX_BYTES`, `LEMVO_SNAPSHOT_MAX_SEC`. A single blocked filesystem
+operation is not preempted by this time limit. Content hashes are cached by file
+identity/size/mtime/ctime; unchanged files are not reread. Unrelated assets can be
+excluded with root-relative patterns, one per line in `.lemvo-snapshot-exclude`.
+Large results can use the explicit `prep.last_informative_artifact` path.
+An incomplete scan is recorded as unknown, not no progress: it cannot increment
+preparation/stall/poison counters on its own. Explicit evidence remains usable.
+
+Recovery indexes pending turns in `.lemvo-recovery.sqlite3`. Initial legacy
+discovery is batched; settled and failed recovery rows are not reread at every
+startup. A failed recovery becomes `needs-review`, retaining inputs/output;
+after investigation, `retry-recovery /project turns/<turn_id>` explicitly retries
+that turn while the controller is stopped. No-CLI preflight turns are renamed
+into `.lemvo-turn-archive/<UTC-day>/` with a summary; nothing is deleted and
+guidance is not acknowledged by this archival. Active writers always take priority.
+
+Historical prep pollution can be audited with:
+
+```bash
+bash /installed/templates/lemvo-run.sh repair-prep /project /project/poisoned-archive-<id> "incident reason"
+```
+
+This is dry-run by default. With `--apply` and a stopped controller it subtracts
+only individually evidenced recovered turns whose archived directories contain
+neither CLI identity nor output. It preserves original ledger entries, backs up
+state, appends a repair record, and leaves total/cost/GPU statistics and caps alone.
+It does not equate every archived directory with an invalid turn or reset all history.
+A continuation authorization is consumed once; use a fresh `AUTHORIZE_REQUEST_ID`
+only for a genuinely new authorization, not a persistent environment bypass.
+
+### Resource-wait observations
+
+Normal waits back off from 15 to 60 to 240 to 900 seconds (maximum configurable via
+`LEMVO_WAIT_MAX_POLL_SEC`). Lightweight sleep slices still check human guidance and
+mode changes. The existing default 900-second reassessment remains independent.
+The rc=7 fallback registers the same wait state and closes a preflight-only turn;
+it cannot create a fresh directory on every polling tick.
+
+Optional `.lemvo-wait.json` describes concrete wake observations, not permission:
+
+```json
+{"deadline_epoch": 1800000000, "conditions": [
+  {"kind": "time", "not_before_epoch": 1799990000},
+  {"kind": "process", "pid": 1234, "pid_start": "123456"},
+  {"kind": "heartbeat", "path": "launcher.heartbeat", "max_age_sec": 180},
+  {"kind": "memory", "min_available_bytes": 118111600640}
+]}
+```
+
+Use only relevant observations, with actual times/identities. Dead/stale sources,
+deadlines and invalid contracts create a persistent alert and wake a reassessment;
+they do not automatically declare the research failed or require a new human gate.
+Read `.lemvo-wait-alert.json` and `.lemvo-wait-events.jsonl` for observations.
+Multiple time/memory conditions must all be ready; process/heartbeat conditions
+monitor producer health. Existing launch constraints remain in the research plan.
+
+### Detached operation and deployment identity
+
+`start` intentionally runs in the foreground. For an SSH-independent process use
+a tmux session or `nohup bash /installed/templates/lemvo-run.sh start /project
+--engine claude --mode unattended > /project/lemvo-controller.log 2>&1 < /dev/null &`.
+Do not treat a terminal's session lifetime as the campaign lifetime.
+`doctor` checks all three runtime files, including the helper; startup saves the
+invoked bundle hashes in `.lemvo-runtime-at-start.json`. During deployment compare
+that record, the actual process invocation and installed hashes. Updating files
+does not prove an existing process switched versions. Migrate only at a safe
+turn boundary, retaining background training and the same project ledger.
 
 Missing usage remains unknown with a visible warning; it does not disable the
 independent turn, wall-time and liveness counters. Unrecognized terminal protocols
