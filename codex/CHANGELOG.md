@@ -1,5 +1,12 @@
 # CHANGELOG — codex-for-research
 
+## 2026-10-19 In-flight turn supervision
+
+- Observe streaming CLI activity with persistent heartbeat/status, soft idle warnings and identity-checked hard idle interruption. Absolute turn duration remains unlimited by default.
+- Add turn-scoped operator renewal. Retain SID and pending guidance after timeout; interrupted calls do not increment or reset prep/stall/poison counters.
+- Protect registered attached experiments from CLI cancellation cascades; independent jobs are never signalled. Expose a safety hold rather than claiming every silent tool can be interrupted safely.
+- Retain real elapsed/available usage accounting and prevent timeout-orphan success acknowledgement. Add deterministic CPU tests; no real model/GPU calls required.
+
 ## 2026-10-19 Bounded runtime inspection and recovery
 
 - Bound progress inspection by directory entries, bytes and time; cache content hashes and support project exclusions. Incomplete inspection is unknown, not proof of research stagnation.

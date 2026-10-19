@@ -60,7 +60,65 @@ that message, not a guarantee the model performed every requested action.
 Malformed/unknown terminal events and failed turns leave messages queued.
 Messages arriving during a turn remain for the next turn. At a safe phase
 boundary the agent should checkpoint and return when it sees pending guidance;
-this CLI integration does not interrupt an in-progress model call.
+guidance alone does not interrupt an in-progress model call. The activity watchdog
+below handles unresponsive calls independently.
+
+### In-flight turn watchdog
+
+The adapter observes CLI stdout/stderr growth while the CLI is running. Claude
+uses `--output-format stream-json --verbose --include-partial-messages`; Codex
+uses `exec --json`. Final-only JSON would conceal activity until the turn ends.
+Observation is not proof of useful research: polling, state-file rewrites, queued
+guidance and unrelated training output never refresh this activity timer.
+
+Defaults (seconds; environment variables on the controller/adapter):
+
+| Variable | Default | Meaning |
+| --- | ---: | --- |
+| `LEMVO_TURN_SOFT_IDLE_SEC` | 1800 | Visible warning after no CLI output |
+| `LEMVO_TURN_HARD_IDLE_SEC` | 3600 | Interrupt a still-silent CLI; 0 disables |
+| `LEMVO_TURN_MAX_SEC` | 0 | Optional absolute turn deadline; disabled by default |
+| `LEMVO_TURN_POLL_SEC` | 5 | Observation interval, no model calls |
+| `LEMVO_TURN_TERM_GRACE_SEC` | 15 | Grace before SIGKILL if the same CLI ignores SIGTERM |
+
+These are runtime liveness thresholds, not GPU-hour, model-dollar or research
+budgets. A multi-hour turn with continuing output can run without an absolute cap.
+Silence is only an operational heuristic: adjust/disable the hard idle timer for
+known long silent foreground tools. Prefer independent registered background
+jobs for long training. No idle timeout judges a hypothesis or erases a result.
+
+`status /project` shows the latest `.lemvo-inflight.json`; each turn retains
+`heartbeat.json` and transition-only `watchdog-events.jsonl`. Inspect the observed
+timestamp as well as state: a dead observer cannot keep its timestamp fresh.
+The files show idle/elapsed seconds, pending guidance count and any protected job.
+During a live turn, an operator may grant a turn-local lease:
+
+```bash
+bash /installed/templates/lemvo-run.sh renew /project 1800
+```
+
+This defers automatic interruption for 30 minutes, does not fabricate output,
+does not reset resource/research counters, and cannot renew a later turn.
+
+At hard timeout the watchdog rechecks PID plus Linux starttime and signals only
+that CLI, never a process group or training PID. **A CLI's own signal handler can
+still cancel its foreground tools.** If a registered live experiment is a CLI
+descendant (or the job registry is unreadable), status becomes
+`timeout-protected-job`: automatic termination is withheld, and the operator must
+inspect, detach/finish the job or explicitly decide how to interrupt it. This is
+an observable safety hold, not a guarantee that all tool hangs self-recover.
+Independent registered jobs keep running. Pending steer is not an interrupt request.
+
+Interrupted turns settle as failed (`next_action=runtime_error`, with
+`runtime_reason=turn-timeout` for watchdog expiry), retain
+SID and guidance, and follow the existing bounded runtime-error retry/backoff.
+They record elapsed time and available usage (missing usage stays unknown), but
+neither increment nor reset prep/stall/poison counters. Partial files remain for
+the next turn to inspect. A timeout marker also prevents orphan recovery from
+mistaking an interrupted turn for successful delivery.
+
+Streaming/cancellation semantics: [Claude headless documentation](https://code.claude.com/docs/en/headless)
+and [Codex non-interactive documentation](https://developers.openai.com/codex/noninteractive).
 
 ## Inline dispatch
 

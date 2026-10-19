@@ -10,6 +10,8 @@ import time
 import uuid
 import fnmatch
 import sqlite3
+import math
+import signal
 
 
 def atomic(path, value):
@@ -387,6 +389,8 @@ def recovery_plan():
             elif marker.get('state') in ('settled','needs-review','not-dispatched'):
                 state=marker['state']
             elif manifest.get('session_epoch','legacy')!=epoch(): state='old-epoch'
+            elif (p/'timeout.json').exists():
+                state='needs-review'; reason='timed-out turn; never acknowledge guidance as successful'
             elif result.get('status') in ('succeeded','recovered-orphan'):
                 actions.append(('ack',rel))
             elif result.get('status') or manifest.get('status')=='settled': state='settled'
@@ -549,6 +553,146 @@ def doctor(controller):
     print(json.dumps(report, ensure_ascii=False, indent=2))
 
 
+def watchdog_config():
+    defaults = {'SOFT_IDLE_SEC': 1800, 'HARD_IDLE_SEC': 3600,
+                'MAX_SEC': 0, 'POLL_SEC': 5, 'TERM_GRACE_SEC': 15}
+    values = {}
+    for key, default in defaults.items():
+        value = float(os.environ.get('LEMVO_TURN_' + key, default))
+        if not math.isfinite(value) or value < 0 or (key == 'POLL_SEC' and value == 0):
+            raise ValueError('invalid LEMVO_TURN_' + key)
+        values[key] = value
+    if values['SOFT_IDLE_SEC'] and values['HARD_IDLE_SEC'] and values['SOFT_IDLE_SEC'] > values['HARD_IDLE_SEC']:
+        raise ValueError('soft idle timeout must not exceed hard idle timeout')
+    return values
+
+
+def attached_jobs(engine_pid):
+    """Do not let CLI signal handlers cascade into a registered live experiment."""
+    path = Path('.lemvo-jobs.json')
+    if not path.exists(): return []
+    jobs = load(path)
+    if not isinstance(jobs, list): return ['unreadable-job-registry']
+    protected = []
+    for job in jobs:
+        if not isinstance(job, dict): return ['invalid-job-registry']
+        try: pid = int(job.get('pid', 0))
+        except (ValueError, TypeError): continue
+        if pid <= 0: continue
+        identity = process_identity(pid)
+        if not identity: continue
+        if job.get('pid_start') and str(job['pid_start']) != identity: continue
+        seen = set()
+        while pid > 1 and pid not in seen:
+            if pid == engine_pid:
+                protected.append(str(job.get('run_id', job.get('pid')))); break
+            seen.add(pid)
+            try: pid = int(Path('/proc/%d/stat' % pid).read_text().rsplit(')', 1)[1].split()[1])
+            except (OSError, ValueError, IndexError): break
+    return protected
+
+
+def renew_turn(seconds):
+    seconds = float(seconds)
+    if not math.isfinite(seconds) or seconds <= 0: raise ValueError('renew requires positive seconds')
+    hb = load('.lemvo-inflight.json', {})
+    pid, identity = hb.get('engine_pid'), hb.get('engine_start')
+    if not pid or not identity or process_identity(pid) != identity:
+        raise ValueError('no verified live turn to renew')
+    # A lease is scoped to this turn and process, never to future turns or budgets.
+    lease = dict(turn_id=hb['turn_id'], engine_pid=pid, engine_start=identity,
+                 until_epoch=time.time() + seconds)
+    atomic('.lemvo-turn-lease.json', lease)
+    print(json.dumps(lease))
+
+
+def watch_turn(td, tid, pid, identity):
+    """Observe output, not research success. Signals only this verified CLI PID."""
+    cfg = watchdog_config(); pid = int(pid); td = Path(td)
+    started = last = time.monotonic(); last_epoch = time.time()
+    sizes = {}; state = ''; sent = None; reason = None
+    session_epoch = epoch()
+    def current():
+        try:
+            return epoch() == session_epoch and Path('.autoloop-turn-active').read_text().split('|')[0] == tid
+        except OSError: return False
+    def publish(new_state, protected=None):
+        nonlocal state
+        now = time.time()
+        hb = dict(schema='lemvo-inflight-v1', turn_id=tid, engine_pid=pid,
+                  engine_start=identity, state=new_state, observed_epoch=now,
+                  last_activity_epoch=last_epoch, idle_sec=round(time.monotonic()-last, 3),
+                  elapsed_sec=round(time.monotonic()-started, 3), policy=cfg,
+                  pending_steer=sum(1 for _ in Path('.lemvo-steer-queue').glob('q-*.md')),
+                  protected_jobs=protected or [], reason=reason,
+                  activity_basis='stdout/stderr byte growth; not proof of useful progress')
+        atomic(td/'heartbeat.json', hb)
+        if current():
+            atomic('.lemvo-inflight.json', hb)
+            if new_state not in ('ended', 'timed-out'):
+                status = 'RUNNING'  # Preserve the public state enum; warning is in detail.
+                atomic('.lemvo-status', '%s|%s|turn_id=%s idle=%.1fs elapsed=%.1fs pending_steer=%d|%s\n' %
+                       (status, new_state, tid, hb['idle_sec'], hb['elapsed_sec'], hb['pending_steer'],
+                        time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(now))))
+        if new_state != state:
+            with (td/'watchdog-events.jsonl').open('a') as f:
+                f.write(json.dumps(hb)+'\n')
+            if new_state not in ('active', 'ended'):
+                print('LEMVO_WATCHDOG %s turn=%s idle=%.1fs' % (new_state, tid, hb['idle_sec']), flush=True)
+            state = new_state
+    while True:
+        now = time.monotonic()
+        # Only new CLI output is observable activity. Polling, state-file writes,
+        # CPU usage, unrelated training output and queued steer do not reset it.
+        for name in ('engine-stdout.jsonl', 'engine-stderr.log'):
+            try: size = (td/name).stat().st_size
+            except OSError: size = 0
+            if size > sizes.get(name, 0): last = now; last_epoch = time.time()
+            sizes[name] = size
+        if process_identity(pid) != identity:
+            publish('timed-out' if sent is not None else 'ended')
+            return 124 if sent is not None else 0
+        if epoch() != session_epoch:
+            # An explicit reset fences the old watcher. Losing the adapter marker
+            # alone must not abandon its orphan CLI without supervision.
+            publish('superseded'); return 0
+        idle = now-last; elapsed = now-started
+        lease = load('.lemvo-turn-lease.json', {})
+        try:
+            leased = (lease.get('turn_id') == tid and lease.get('engine_pid') == pid
+                      and lease.get('engine_start') == identity
+                      and float(lease.get('until_epoch', 0)) > time.time())
+        except (ValueError, TypeError, AttributeError): leased = False
+        hard = ((cfg['HARD_IDLE_SEC'] and idle >= cfg['HARD_IDLE_SEC']) or
+                (cfg['MAX_SEC'] and elapsed >= cfg['MAX_SEC']))
+        if sent is not None:
+            if now-sent >= cfg['TERM_GRACE_SEC'] and process_identity(pid) == identity:
+                try: os.kill(pid, signal.SIGKILL)
+                except ProcessLookupError: pass
+            publish('terminating')
+        elif hard and not leased:
+            protected = attached_jobs(pid)
+            if protected:
+                # Claude's SIGTERM handler can terminate foreground Bash children.
+                # Preserve known live jobs and make the exceptional hold visible.
+                publish('timeout-protected-job', protected)
+            else:
+                reason = 'wall-timeout' if cfg['MAX_SEC'] and elapsed >= cfg['MAX_SEC'] else 'idle-timeout'
+                marker = dict(turn_id=tid, engine_pid=pid, engine_start=identity,
+                              reason=reason, observed_epoch=time.time(), signal='SIGTERM',
+                              scientific_verdict=None)
+                # Persist before signalling, so interrupted adapters can recover safely.
+                atomic(td/'timeout.json', marker)
+                if process_identity(pid) == identity:
+                    try: os.kill(pid, signal.SIGTERM)
+                    except ProcessLookupError: pass
+                sent = now; publish('terminating')
+        elif leased: publish('lease-active')
+        elif cfg['SOFT_IDLE_SEC'] and idle >= cfg['SOFT_IDLE_SEC']: publish('idle-warning')
+        else: publish('active')
+        time.sleep(cfg['POLL_SEC'])
+
+
 if __name__ == '__main__':
     cmd = sys.argv[1]
     if cmd == 'bootstrap': bootstrap()
@@ -567,4 +711,7 @@ if __name__ == '__main__':
     elif cmd == 'repair-prep': repair_prep(sys.argv[2],sys.argv[3],'--apply' in sys.argv[4:])
     elif cmd == 'delivery': delivery(*sys.argv[2:])
     elif cmd == 'doctor': doctor(sys.argv[2])
+    elif cmd == 'watchdog-config': watchdog_config()
+    elif cmd == 'watch-turn': raise SystemExit(watch_turn(*sys.argv[2:6]))
+    elif cmd == 'renew-turn': renew_turn(sys.argv[2])
     else: raise SystemExit(64)

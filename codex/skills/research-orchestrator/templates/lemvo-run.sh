@@ -176,6 +176,8 @@ enqueue_steer() {  # $1=内容来源文件（只读复制） $2=标签；输出�
 
 # ── 子命令 ──
 case "$CMD" in
+  renew)
+    python3 "$RUNTIME_SUPPORT" renew-turn "${3:-1800}"; exit $?;;
   doctor)
     python3 "$RUNTIME_SUPPORT" doctor "$0"; exit $?;;
   repair-prep)
@@ -215,6 +217,7 @@ case "$CMD" in
     [ -f "$STATUS_F" ] && echo "status=$(cat "$STATUS_F")"
     echo "steer_pending=$(ls "$QUEUE"/q-*.md 2>/dev/null | wc -l) receipts_unconsumed=$(grep -l '"consumed": false' "$RECEIPTS"/*.json 2>/dev/null | wc -l)"
     echo "turn_inflight=$(turn_inflight && echo yes || echo no)"
+    [ -f .lemvo-inflight.json ] && { echo 'last_inflight_observation:'; cat .lemvo-inflight.json; }
     [ -f "$CONTROL_LOG" ] && echo "last_control=$(tail -1 "$CONTROL_LOG" 2>/dev/null)"
     [ -f "$JOBS" ] && { echo "active jobs:"; cat "$JOBS"; }
     exit 0;;
