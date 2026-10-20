@@ -12,6 +12,7 @@ import fnmatch
 import sqlite3
 import math
 import signal
+import subprocess
 
 
 def atomic(path, value):
@@ -66,6 +67,9 @@ def prompt(source, target):
     mode = Path('.lemvo-mode').read_text().strip() if Path('.lemvo-mode').exists() else 'unspecified'
     delegation = Path('.lemvo-delegation').read_text().strip() if Path('.lemvo-delegation').exists() else 'auto'
     parts = ['Runtime context: mode=%s; delegation=%s.' % (mode, delegation)]
+    contract = Path(__file__).with_name('runtime-contract.py')
+    if contract.is_file():
+        parts.append(subprocess.check_output([sys.executable, str(contract), 'context']).decode('utf-8'))
     if mode in ('guided', 'unattended'):
         parts.append('The project mode is already selected; do not ask again. Preserve existing authorization and constraints.')
     if delegation == 'inline':
@@ -537,7 +541,7 @@ def doctor(controller):
     current = Path(controller).resolve()
     report['invoked_controller'] = str(current)
     report['sha256'] = hashlib.sha256(current.read_bytes()).hexdigest()
-    bundle=('lemvo-run.sh','autoloop-reference.sh','runtime-support.py')
+    bundle=('lemvo-run.sh','autoloop-reference.sh','runtime-support.py','runtime-contract.py')
     report['bundle']={name:hashlib.sha256((current.parent/name).read_bytes()).hexdigest()
         if (current.parent/name).is_file() else None for name in bundle}
     report['complete_bundle']=all(report['bundle'].values())

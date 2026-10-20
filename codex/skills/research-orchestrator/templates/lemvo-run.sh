@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# lemvo-run v5 — bounded recovery/snapshots, observable waits (2026-10-19)
+# lemvo-run v6 — wait/reply closure, construction accounting, scoped instructions
 #  C1 原子 owner 锁：锁目录在临时目录完整初始化后原子 rename 发布（不存在
 #     "mkdir 成功但 PID 未写完"窗口）；缺/坏 PID 一律不判死 owner（宽限期内
 #     等待，超宽限才隔离）；退出清理核对锁身份，绝不误删他人锁；PID 复用
@@ -37,7 +37,9 @@ set -uo pipefail
 CMD="${1:-}"; PROJ="${2:-}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 RUNTIME_SUPPORT="$HERE/runtime-support.py"
+RUNTIME_CONTRACT="$HERE/runtime-contract.py"
 [ -f "$RUNTIME_SUPPORT" ] || { echo "Missing runtime-support.py: install the complete research-orchestrator skill."; exit 64; }
+[ -f "$RUNTIME_CONTRACT" ] || { echo "Missing runtime-contract.py: install the complete runtime bundle."; exit 64; }
 AUTOLOOP="${AUTOLOOP_SCRIPT:-$HERE/autoloop-reference.sh}"
 MODE_F=.lemvo-mode; ENGINE_F=.lemvo-engine; STATUS_F=.lemvo-status
 LOCKD=.lemvo-owner.lock; QUEUE=.lemvo-steer-queue; ARCHIVE=.lemvo-steer-archive
@@ -63,7 +65,7 @@ set_status() {  # $1=状态[|细节]（或 $1=状态 $2=细节）；中央解析
   case "$st" in
     RUNNING) act=continue;;
     WAITING_JOB) act=waiting_jobs;;
-    WAITING_USER|BLOCKED) act=needs_user;;
+    WAITING_USER|BLOCKED|STALLED) act=needs_user;;
     COMPLETED) act=completed;;
     PAUSED) act=paused;;   # r29-fix2：运行器暂停（如 max-turns）——非课题完成
     *) act=runtime_error;;
@@ -160,22 +162,23 @@ turn_inflight() {  # .autoloop-turn-active = turn_id|adapter_pid|adapter_start
 
 # ── C3：原子入队（隐藏临时文件 → rename 发布；失败不发布）──
 enqueue_steer() {  # $1=内容来源文件（只读复制） $2=标签；输出发布路径
-  local src="$1" tag="${2:-msg}" id tmp
+  local src="$1" tag="${2:-msg}" pub
+  shift 2
   [ -f "$src" ] || return 1
   mkdir -p "$QUEUE"
-  id="$(date +%Y%m%d-%H%M%S%N)-$$-${tag}"
-  tmp="$QUEUE/.tmp-$id.$(date +%s%N)"
-  { echo "<!-- message_id: q-$id -->"; echo "<!-- created: $(date -u +%FT%TZ) -->"; cat "$src"; } > "$tmp" || { rm -f "$tmp"; return 1; }
-  mv "$tmp" "$QUEUE/q-$id.md" || { rm -f "$tmp"; return 1; }
+  pub=$(python3 "$RUNTIME_CONTRACT" enqueue "$src" "$tag" "$@") || return 1
   local qlist
-  qlist=$(mktemp); echo "$QUEUE/q-$id.md" > "$qlist"
+  qlist=$(mktemp); echo "$pub" > "$qlist"
   python3 "$RUNTIME_SUPPORT" delivery queued "$qlist" >&2
   rm -f "$qlist"
-  echo "$QUEUE/q-$id.md"
+  echo "$pub"
 }
 
 # ── 子命令 ──
 case "$CMD" in
+  track)
+    shift 2
+    python3 "$RUNTIME_CONTRACT" track "$@"; exit $?;;
   renew)
     python3 "$RUNTIME_SUPPORT" renew-turn "${3:-1800}"; exit $?;;
   doctor)
@@ -210,7 +213,7 @@ case "$CMD" in
   steer)
     SRC="${3:?用法: lemvo-run.sh steer <projdir> <消息文件>}"
     [ -f "$SRC" ] || { echo "指导文件不存在: $SRC"; exit 64; }
-    PUB=$(enqueue_steer "$SRC" "steer") || { echo "指导入队失败（未发布）"; exit 1; }
+    PUB=$(enqueue_steer "$SRC" "steer" "${@:4}") || { echo "指导入队失败（未发布）"; exit 1; }
     say "指导已入队（$(basename "$PUB")，原子发布；调用者文件未动）"; exit 0;;
   status)
     echo "mode=$(mode_now) engine=$(engine_now) owner_pid=$(owner_pid) alive=$(owner_alive && echo yes || echo no)"
@@ -218,6 +221,7 @@ case "$CMD" in
     echo "steer_pending=$(ls "$QUEUE"/q-*.md 2>/dev/null | wc -l) receipts_unconsumed=$(grep -l '"consumed": false' "$RECEIPTS"/*.json 2>/dev/null | wc -l)"
     echo "turn_inflight=$(turn_inflight && echo yes || echo no)"
     [ -f .lemvo-inflight.json ] && { echo 'last_inflight_observation:'; cat .lemvo-inflight.json; }
+    [ -f .lemvo-wait-state.json ] && { echo 'wait_contract:'; cat .lemvo-wait-state.json; }
     [ -f "$CONTROL_LOG" ] && echo "last_control=$(tail -1 "$CONTROL_LOG" 2>/dev/null)"
     [ -f "$JOBS" ] && { echo "active jobs:"; cat "$JOBS"; }
     exit 0;;
@@ -412,13 +416,7 @@ PYM
 
 # ── steer 队列快照（只扫已原子发布的不可变文件）──
 steer_snapshot() {
-  local files out
-  files=$(ls "$QUEUE"/q-*.md 2>/dev/null | sort)
-  [ -z "$files" ] && return 1
-  out=$(mktemp)
-  printf '%s\n' "$files" > "$out.list"
-  for f in $files; do cat "$f" >> "$out"; echo >> "$out"; done
-  echo "$out"
+  python3 "$RUNTIME_CONTRACT" snapshot
 }
 steer_archive_consumed() {  # 仅归档本轮快照清单内的（轮中提交的留队列；失败不归档）
   local listf="${1:-}"
@@ -471,6 +469,10 @@ recover_turns() {
         python3 "$RUNTIME_SUPPORT" delivery delivered "$td/steer-published.list" "$(basename "$td")"
         steer_archive_consumed "$td/steer-published.list"
       }
+    [ -f "$td/steer-superseded.list" ] && {
+        python3 "$RUNTIME_SUPPORT" delivery superseded "$td/steer-superseded.list" "$(basename "$td")"
+        steer_archive_consumed "$td/steer-superseded.list"
+      }
     [ -f "$td/job-batch.list" ] && mark_receipts_consumed "$td/job-batch.list"
     python3 "$RUNTIME_SUPPORT" recovery-mark "$td" settled confirmed
   done < "$plan"
@@ -481,6 +483,7 @@ recover_turns() {
 # ── turn 目录与清单（持久 turn manifest，R1-R3 + 结果闭环）──
 campaign_id() { echo "$(hostname 2>/dev/null || echo unknown-host):$(basename "$(cd "$PROJ" && pwd)")"; }
 begin_turn() {  # 设置全局 TD/TURN_ID，写 manifest 骨架；导出给 adapter
+  echo "${TURN:-0}" > .lemvo-turn-count
   TURN_ID="t$(date -u +%Y%m%dT%H%M%SZ)-$$-$TURN"
   TD="$TURNSD/$TURN_ID"
   mkdir -p "$TD"
@@ -504,6 +507,10 @@ PYM
 confirm_turn() {  # 本批成功后：归档 steer、确认回执、合并 job/steer 引用、settled
   [ -n "${MSG_FILE:-}" ] && python3 "$RUNTIME_SUPPORT" delivery delivered "$MSG_FILE.slist" "${TURN_ID:-}"
   [ -n "${MSG_FILE:-}" ] && { steer_archive_consumed "$MSG_FILE.slist"; mark_receipts_consumed "$MSG_FILE.rlist"; }
+  if [ -n "${TD:-}" ] && [ -f "$TD/steer-superseded.list" ]; then
+    python3 "$RUNTIME_SUPPORT" delivery superseded "$TD/steer-superseded.list" "${TURN_ID:-}"
+    steer_archive_consumed "$TD/steer-superseded.list"
+  fi
   if [ -n "${TD:-}" ] && [ -f "$TD/result.json" ]; then
     python3 - "$TD" <<'PYC2'
 import json, os, sys
@@ -535,7 +542,7 @@ PYC2
 assemble_step_message() {  # 设置 MSG_FILE（可空）与 TD 引用清单
   MSG_FILE=""
   local SNAP RCPT
-  SNAP=$(steer_snapshot || true)
+  SNAP=$(steer_snapshot) || return 4
   RCPT=$(consume_receipts_snapshot || true)
   if [ -n "$SNAP" ] && [ -n "$RCPT" ]; then
     MSG_FILE=$(mktemp); cat "$RCPT" "$SNAP" > "$MSG_FILE"
@@ -549,6 +556,7 @@ assemble_step_message() {  # 设置 MSG_FILE（可空）与 TD 引用清单
     cp "$MSG_FILE" "$TD/input.md"
     [ -s "$MSG_FILE.rlist" ] && cp "$MSG_FILE.rlist" "$TD/job-batch.list"
     [ -s "$MSG_FILE.slist" ] && cp "$MSG_FILE.slist" "$TD/steer-published.list"
+    [ -n "$SNAP" ] && [ -s "$SNAP.superseded.list" ] && cp "$SNAP.superseded.list" "$TD/steer-superseded.list"
     python3 "$RUNTIME_SUPPORT" delivery submitted "$MSG_FILE.slist" "${TURN_ID:-}"
   fi
 }
@@ -659,7 +667,7 @@ if [ "$CMD" = "advance" ]; then
   TURN=0; TURN_ID=""; TD=""
   export LEMVO_RESOURCE_WAKE=user-advance
   begin_turn || exit 4
-  assemble_step_message
+  assemble_step_message || { set_status "BLOCKED|instruction-contract"; exit 4; }
   dispatch_step; rc=$?
   [ $rc -eq 0 ] && confirm_turn
   if [ $rc -eq 7 ]; then python3 "$RUNTIME_SUPPORT" preflight-close "$TD" WAITING_RESOURCE; python3 "$RUNTIME_SUPPORT" wait-register; fi
@@ -745,7 +753,7 @@ while :; do
   unset LEMVO_RESOURCE_WAKE
   # 模式与终态
   [ -f CAMPAIGN-DONE ] && { set_status "COMPLETED|campaign-done"; log "项目已完成——退出（不重开终态）"; exit 0; }
-  TURN=$((TURN + 1)); echo "$TURN" > .lemvo-turn-count
+  TURN=$((TURN + 1))
   # r29-fix2：max-turns 是运行器暂停（轮预算用完），不是课题完成——
   # 无产物也绝不记 COMPLETED（COMPLETED 只留给引擎报告的 campaign-done）。
   # 续跑：再次 start/advance 即可（轮数重新计数，状态/预算保留）。
@@ -785,10 +793,11 @@ while :; do
     '') : ;;
   esac
 
-  # C2：guided 常驻等待（控制器不退出；响应推进请求）
+  # guided: one explicit advance or newly queued guidance, then wait again.
   if [ "$(mode_now)" = "guided" ]; then
-    if [ -f "$REQ_ADV" ]; then
-      rm -f "$REQ_ADV"; set_status "RUNNING|advance-request"
+    ELIGIBLE=$(python3 "$RUNTIME_CONTRACT" has-guidance) || { set_status "BLOCKED|instruction-contract"; exit 4; }
+    if [ -f "$REQ_ADV" ] || [ "$ELIGIBLE" = yes ]; then
+      rm -f "$REQ_ADV"; set_status "RUNNING|advance-or-guidance"
       export LEMVO_RESOURCE_WAKE=user-advance
     else
       set_status "WAITING_USER|guided-idle"; sleep "$POLL"; TURN=$((TURN - 1)); continue
@@ -799,6 +808,23 @@ while :; do
   if turn_inflight; then
     set_status "WAITING_JOB|engine-inflight-$(cat .autoloop-turn-active 2>/dev/null | cut -d'|' -f1)"
     sleep "$POLL"; TURN=$((TURN - 1)); continue
+  fi
+
+  # One wait contract. Human replies get one interpretation turn; STOP/PAUSED
+  # never disappear merely because a new message or advance request arrived.
+  if [ -f "$REQ_ADV" ]; then rm -f "$REQ_ADV"; export LEMVO_RESOURCE_WAKE=user-advance; fi
+  GATE_FILE=$(mktemp)
+  python3 "$RUNTIME_CONTRACT" state-shell > "$GATE_FILE" || { rm -f "$GATE_FILE"; set_status "BLOCKED|wait-contract"; exit 4; }
+  . "$GATE_FILE"; rm -f "$GATE_FILE"
+  if [ "$GATE_KIND" = done ]; then set_status "COMPLETED|campaign-done"; exit 0; fi
+  if [ "$GATE_KIND" = hard ]; then
+    set_status "PAUSED|${GATE_REASON}"; sleep "$POLL"; TURN=$((TURN - 1)); continue
+  fi
+  if [ "$GATE_KIND" = human ]; then
+    ELIGIBLE=$(python3 "$RUNTIME_CONTRACT" has-guidance) || { set_status "BLOCKED|instruction-contract"; exit 4; }
+    if [ "$ELIGIBLE" != yes ] && [ "${LEMVO_RESOURCE_WAKE:-}" != user-advance ]; then
+      set_status "WAITING_USER|${WAIT_QUESTION_ID}"; sleep "$POLL"; TURN=$((TURN - 1)); continue
+    fi
   fi
 
   # Resource waiting is a polling state, not a permanent pre-dispatch veto.
@@ -813,7 +839,7 @@ while :; do
   fi
 
   begin_turn || exit 4
-  assemble_step_message
+  assemble_step_message || { set_status "BLOCKED|instruction-contract"; exit 4; }
   dispatch_step; rc=$?
 
   case $rc in
@@ -826,11 +852,14 @@ while :; do
          PROTO_NOSID=0
        fi
        confirm_turn;;
-    2) set_status "BLOCKED|budget-decision"; log "预算决策点——控制器停止等人"; exit 2;;
+    2) if [ "$REASON" = STALL_NO_ARTIFACT ]; then
+         set_status "STALLED|no-progress"; log "执行无进展——等待具体下一动作（不是科研否定）"
+       else set_status "BLOCKED|budget-decision"; log "预算决策点——控制器停止等人"; fi
+       exit 2;;
     6) case "$REASON" in
          *CAMPAIGN_DONE*) set_status "COMPLETED|campaign-done"; log "引擎报告项目完成"; exit 0;;
-         *BLOCKED*) set_status "BLOCKED|blocked-user(${REASON})"; log "引擎阻塞态（$REASON）——按原因转 BLOCKED，长等待不空转"; sleep 600; TURN=$((TURN - 1)); continue;;
-         *) set_status "WAITING_USER|blocked-state(${REASON:-HOLD})"; log "阻塞态（${REASON:-HOLD}）——转 WAITING_USER 长等待"; sleep 300; TURN=$((TURN - 1)); continue;;
+         *) python3 "$RUNTIME_SUPPORT" preflight-close "$TD" "${REASON:-HOLD}"
+            set_status "WAITING_USER|blocked-state(${REASON:-HOLD})"; sleep "$POLL"; TURN=$((TURN - 1)); continue;;
        esac;;
     7) python3 "$RUNTIME_SUPPORT" preflight-close "$TD" WAITING_RESOURCE
        python3 "$RUNTIME_SUPPORT" wait-register

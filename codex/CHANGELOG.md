@@ -1,5 +1,20 @@
 # CHANGELOG — codex-for-research
 
+## 2026-10-20 — Runtime wait, construction and instruction contracts
+
+- Human waiting states share one gate: no model polling; a reply/advance allows
+  one assessment, without granting resources or clearing hard pauses.
+- Prep and stall accounting consume the same before/after engineering evidence.
+  Code, configuration, launchers and analysis count; bookkeeping and repeated
+  content do not. Explicit file registration covers deep/external implementations.
+- Optional scoped instruction IDs and explicit supersession preserve immutable
+  history and freeze the active revision at each turn boundary. Legacy steer
+  remains append-only; global permissions are not overwritten by task replacement.
+- Structured three-line runtime receipts separate operational failure/waiting
+  from scientific conclusions. Existing watchdog and cumulative accounting stay.
+- Isolated regression coverage includes restart, failed delivery, same-clock
+  ordering, orphan progress recovery and mid-turn replacement.
+
 ## 2026-10-19 In-flight turn supervision
 
 - Observe streaming CLI activity with persistent heartbeat/status, soft idle warnings and identity-checked hard idle interruption. Absolute turn duration remains unlimited by default.

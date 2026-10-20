@@ -10,6 +10,7 @@ python3 tests/runtime_policy_test.py  # real adapter, isolated CPU stubs
 python3 tests/runtime_liveness_test.py  # controller/adapter lifecycle, no model or GPU
 python3 tests/runtime_scalability_test.py  # controller/adapter lifecycle, no model or GPU
 python3 tests/runtime_inflight_test.py  # controller/adapter lifecycle, no model or GPU
+python3 tests/runtime_contract_test.py  # wait/reply, construction accounting, scoped instructions
 if [ -f tests/team_classification_test.py ]; then
   python3 tests/team_classification_test.py  # optional installed backend consumer
 fi

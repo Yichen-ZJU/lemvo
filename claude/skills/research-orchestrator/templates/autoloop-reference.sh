@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 单轮适配器 v4.12：在途活性监管；超时不是科研否定（2026-10-19）
+# 单轮适配器 v4.13：等待/唤醒闭环、统一建设进展与指令版本（2026-10-20）
 #  v4.8 变更（对 v4.7，均带隔离回归）：
 #  费用政策（用户决定 2026-10-14）：USD 费用默认只统计、不停止、不缩实验、
 #    不否定方向；金额停止门仅当 budget.cap_authorized: yes（真实用户明确授权、
@@ -67,9 +67,11 @@
 set -uo pipefail
 # One version source: write_helper emits this marker into the generated Python.
 # Bump on helper changes so existing project-local helpers migrate exactly once.
-HELPER_VERSION="4.12"
+HELPER_VERSION="4.13"
 RUNTIME_SUPPORT="$(cd "$(dirname "$0")" && pwd)/runtime-support.py"
+RUNTIME_CONTRACT="$(cd "$(dirname "$0")" && pwd)/runtime-contract.py"
 [ -f "$RUNTIME_SUPPORT" ] || { echo "Missing runtime-support.py: install the complete research-orchestrator skill."; exit 64; }
+[ -f "$RUNTIME_CONTRACT" ] || { echo "Missing runtime-contract.py: install the complete runtime bundle."; exit 64; }
 
 # ── --init 模式 ──
 if [ "${1:-}" = "--init" ]; then
@@ -164,13 +166,12 @@ python3 -c "import sys; v=float(sys.argv[1]); sys.exit(0 if v>=0 else 1)" "$PREP
 # ── 助手版本管理（S2）──
 write_helper() {
   printf '#!/usr/bin/env python3\nHELPER_VERSION = "%s"\n' "$HELPER_VERSION" > "$HELPER"
+  printf 'CONTRACT_PATH = %s\n' "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$RUNTIME_CONTRACT")" >> "$HELPER"
   cat >> "$HELPER" <<'PYEOF'
 """autoloop accounting helper. Python 3.6 compatible; standard library only."""
-import fnmatch, hashlib, json, math, os, re, sys
+import fnmatch, hashlib, json, math, os, re, sys, subprocess
 
 STATE = "research-state.yaml"
-BLOCKING = {"HOLD", "STOPPED", "PAUSED", "EVIDENCE_HOLD", "STOPPED_INCONCLUSIVE",
-            "BLOCKED", "BLOCKED_USER"}
 PREP_DEFAULTS = [("prep_turns", "0"), ("prep_wall_time_min", "0.0"), ("prep_cost", "null"),
                  ("last_informative_observation", "none"), ("last_seen_observation", "none"),
                  ("last_informative_artifact", "none"), ("last_artifact_sha", "none"),
@@ -593,20 +594,11 @@ def cmd_prepare():
     print("WALL_MIN=" + q(total.get("total_wall_time_min", "0.0")))
 
 def cmd_block_check():
-    f, prep, total = read_fields()
-    states = [f["campaign_status"], f["measurement_state"], f["project_status"],
-              f["root_status"], f["status"]]
-    blocking = [s.upper() for s in states if s and s.upper() in BLOCKING]
-    def q(v):
-        return "'" + str(v).replace("'", "'\\''") + "'"
-    # R3：组合值（如 HOLD|PAUSED）必须单引号输出——source 按数据读取，
-    # 管道符不得成为 shell 语法（旧版裸输出会当管道执行 rc1）
-    print("BLOCKING=" + q("|".join(blocking) if blocking else "none"))
-    print("WAITING=" + q("yes" if any(s.upper() == "WAITING_RESOURCE" for s in states if s) else "no"))
+    # Single wait enum/priority contract, also used by the controller.
+    subprocess.check_call([sys.executable, CONTRACT_PATH, "state-shell"])
 
 def cmd_settle():
-    """S1 凭据类型化：进展 = artifact 匹配建设类白名单 且 sha 变化。
-    BUG-1：STATE 缺失（新战役 bootstrap 期间）不崩溃——记无进展并输出默认值。"""
+    """Consume runner-owned progress; typed fallback only for pre-contract recovery."""
     global LINES
     if not os.path.exists(STATE):
         print("NEW_PROGRESS=no"); print("ARTIFACT_TYPED=no")
@@ -623,6 +615,12 @@ def cmd_settle():
         if typed:
             new_sha = sha256_file(artifact)
     new_progress = bool(new_sha) and new_sha != last_sha
+    record_path = os.environ.get("LEMVO_PROGRESS_RECORD")
+    record = None
+    if record_path:
+        with open(record_path, encoding="utf-8") as fh:
+            record = json.load(fh)
+        new_progress = record["progress"]
     last_obs = prep.get("last_informative_observation", "none")
     last_seen = prep.get("last_seen_observation", "none")
     try:
@@ -636,12 +634,14 @@ def cmd_settle():
     interrupted = os.environ.get("LEMVO_TURN_INTERRUPTED") == "yes"
     inspection_unknown = (os.environ.get("LEMVO_PROGRESS_INCOMPLETE") == "yes"
                           or os.environ.get("LEMVO_WAIT_ASSESSMENT") == "yes")
+    if record is not None:
+        inspection_unknown = record["neutral"]
     turns = turns if interrupted else (0 if new_progress else (turns if inspection_unknown else turns + 1))
     total_turns += 1
     LINES = open(STATE, encoding="utf-8").read().splitlines()
     set_in("prep", "prep_turns", turns)
     set_in("prep", "last_seen_observation", last_obs if new_progress else last_seen)
-    if new_progress and not interrupted:
+    if new_progress and new_sha and not interrupted:
         set_in("prep", "last_artifact_sha", new_sha)
     set_in("total", "total_turns", total_turns)
     open(STATE, "w", encoding="utf-8").write("\n".join(LINES) + "\n")
@@ -998,6 +998,15 @@ sys.exit(1)' "$LEDGER" "$NEW_SID" 2>/dev/null; then
   fi
   [ -n "$NEW_SID" ] && echo "$NEW_SID" > "$SID_FILE"
   helper init >/dev/null 2>&1 || true
+  if [ -f "$TD/progress-explicit-before.json" ]; then
+    # A successful orphan uses the same construction record as a normal turn.
+    # Preserve an already measured record; do not count later unrelated edits.
+    if [ ! -f "$TD/progress.json" ]; then
+      python3 "$RUNTIME_SUPPORT" progress-changed "$TD/progress-before.json" >/dev/null || exit 4
+      python3 "$RUNTIME_CONTRACT" progress-end "$TD" >/dev/null || exit 4
+    fi
+    export LEMVO_PROGRESS_RECORD="$TD/progress.json"
+  fi
   helper settle >/dev/null 2>&1 || say "recover：settle 失败（保留现场）"
   # R4：把恢复出的 engine/SID 传给计量解析——复用正常结算口径（codex 累计差分），
   # 不再落 0/0 假账；归因不可得时 helper 按无基线口径取当轮值，unknown 保持 unknown
@@ -1061,11 +1070,20 @@ obj = {"schema_version": 1, "schema": "lemvo-turn-result",
                  "tokens_out": tout if tout != "unknown" else None},
        "scientific_verdict": {}, "artifact_refs": [],
        "ended_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+progress_path=os.path.join(td,"progress.json")
+if os.path.exists(progress_path):
+    progress=json.load(open(progress_path))
+    kind=progress.get("wait",{}).get("kind")
+    obj["next_action"]={"human":"needs_user","hard":"paused","resource":"waiting_jobs","done":"completed"}.get(kind,"continue")
+    obj["progress_kind"]=progress.get("kind")
+    obj["wait"]=progress.get("wait")
+    obj["artifact_refs"]=[c["path"] for c in progress.get("changes",[])]
 p = os.path.join(td, "result.json")
 tmp = p + ".tmp-%d" % os.getpid()
 json.dump(obj, open(tmp, "w"), indent=1)
 os.replace(tmp, p)
 PYRW
+  python3 "$RUNTIME_CONTRACT" receipt "$TD" || exit 4
   [ -f "$TD/engine.json" ] && python3 -c 'import json,sys
 p=sys.argv[1]+"/engine.json"
 try:
@@ -1130,7 +1148,12 @@ DECISION_FILE=$(mktemp); helper prepare > "$DECISION_FILE" || { rm -f "$DECISION
 # ── 2) 阻塞与等待（C6：结构化 reason 由控制器按原因转状态）──
 BLOCK_CHECK=$(mktemp); helper block-check > "$BLOCK_CHECK" || { rm -f "$BLOCK_CHECK"; exit 4; }
 . "$BLOCK_CHECK"; rm -f "$BLOCK_CHECK"
-if [ "$BLOCKING" != "none" ]; then
+GUIDANCE_WAKE=no
+if [ "${LEMVO_RESOURCE_WAKE:-}" = user-advance ] || { [ -n "${CALLER_MSG:-}" ] && [ -f "${CALLER_MSG:-}" ]; }; then
+  GUIDANCE_WAKE=yes
+fi
+if [ "$GATE_KIND" = done ]; then emit_reason "CAMPAIGN_DONE"; exit 6; fi
+if [ "$GATE_KIND" = hard ] || { [ "$GATE_KIND" = human ] && [ "$GUIDANCE_WAKE" != yes ]; }; then
   say "阻塞态 $BLOCKING（ACTIVE 不得绕过）——不调用引擎"
   if [ "$RC_MODE" = "structured" ]; then emit_reason "$BLOCKING"; exit 6; fi
   exit 0
@@ -1143,6 +1166,7 @@ fi
 # 文件级标志在结构化模式下同样映射 rc=6（读态后再查一次）
 for f in STOP HOLD CAMPAIGN-DONE BLOCKED-USER; do
   if [ "$RC_MODE" = "structured" ] && [ -f "$f" ]; then
+    if [ "$GATE_KIND" = human ] && [ "$GUIDANCE_WAKE" = yes ]; then continue; fi
     say "标志 $f——blocked"
     case "$f" in
       STOP) emit_reason "STOP_FILE";;
@@ -1178,7 +1202,7 @@ PYOB
   helper ledger-append < "$OB" || true; rm -f "$OB"
   exit 2
 }
-if [ "$PREP_TURNS" -ge "$EFFECTIVE_CAP" ]; then
+if [ "$PREP_TURNS" -ge "$EFFECTIVE_CAP" ] && ! { [ "$GATE_KIND" = human ] && [ "$GUIDANCE_WAKE" = yes ]; }; then
   if [ "$(python3 "$HELPER" auth-available)" = "yes" ]; then
     AUTH=$(mktemp)
     OLD_CAP="$EFFECTIVE_CAP"
@@ -1314,6 +1338,8 @@ cleanup_turn() {
 }
 trap cleanup_turn EXIT
 python3 "$RUNTIME_SUPPORT" progress-snapshot "$TD/progress-before.json" || exit 4
+python3 "$RUNTIME_CONTRACT" freeze "$TD" || exit 4
+python3 "$RUNTIME_CONTRACT" progress-begin "$TD" || exit 4
 
 # ── result.json（E-result：结果驱动闭环的每轮凭据）──
 write_result() {  # $1=status $2=next_action $3=engine_rc
@@ -1333,12 +1359,23 @@ if os.path.exists(os.path.join(td, "timeout.json")):
     obj["runtime_reason"] = "turn-timeout"
 elif os.environ.get("LEMVO_TURN_INTERRUPTED") == "yes":
     obj["runtime_reason"] = "turn-interrupted"
+progress_path = os.path.join(td, "progress.json")
+if os.path.isfile(progress_path):
+    progress = json.load(open(progress_path))
+    obj["progress_kind"] = progress["kind"]
+    obj["wait"] = progress["wait"]
+    obj["artifact_refs"] = list(dict.fromkeys(obj["artifact_refs"] +
+        [item["path"] for item in progress["changes"]]))
+instructions = os.path.join(td, "instructions.json")
+if os.path.isfile(instructions):
+    obj["instruction_revision"] = json.load(open(instructions))["revision"]
 p = os.path.join(td, "result.json")
 if not os.path.exists(p):   # 幂等：已有结果不覆盖（recover 场景）
     tmp = p + ".tmp-%d" % os.getpid()
     json.dump(obj, open(tmp, "w"), indent=1)
     os.replace(tmp, p)
 PYRJ
+  python3 "$RUNTIME_CONTRACT" receipt "$TD" || return 4
 }
 finalize_engine_json() {  # $1=最终 status
   [ -f "$ENGINE_JSON" ] && python3 - "$ENGINE_JSON" "$1" <<'PYEF'
@@ -1409,12 +1446,6 @@ NEW_ARTIFACT=$(python3 "$RUNTIME_SUPPORT" progress-changed "$TD/progress-before.
 export LEMVO_PROGRESS_INCOMPLETE="$(python3 "$RUNTIME_SUPPORT" snapshot-incomplete "$TD/progress-before.json")"
 [ "$LEMVO_PROGRESS_INCOMPLETE" = yes ] && say "Progress inspection incomplete (bounded scan): unknown, not evidence of no research progress. Use an explicit artifact or snapshot exclusions."
 export LEMVO_WAIT_ASSESSMENT=no
-case "${LEMVO_RESOURCE_WAKE:-}" in
-  resource-recheck|wait-*)
-    if python3 "$HELPER" block-check | grep -q "WAITING='yes'"; then
-      export LEMVO_WAIT_ASSESSMENT=yes
-    fi;;
-esac
 
 # ── 6) 会话 ID 提取（claude session_id | codex thread_id | 文本三拼写）──
 NEW_SID=$( grep -h -oE '"session_id"[": ]+[a-f0-9-]{8,}' "$TD/engine-stdout.jsonl" "$TD/engine-stderr.log" 2>/dev/null | head -1 | grep -oE '[a-f0-9]{8}-[a-f0-9-]+' \
@@ -1523,6 +1554,14 @@ else
 fi
 
 # ── 8) 结算（凭据类型化 + 真账 + usage 分列 + 费用 delta 口径）──
+PROGRESS_ARGS=()
+[ "${LEMVO_TURN_INTERRUPTED:-no}" = yes ] && PROGRESS_ARGS+=(--interrupted)
+python3 "$RUNTIME_CONTRACT" progress-end "$TD" "${PROGRESS_ARGS[@]}" >/dev/null || exit 4
+export LEMVO_PROGRESS_RECORD="$TD/progress.json"
+export LEMVO_WAIT_ASSESSMENT="$(python3 -c 'import json,sys; print("yes" if json.load(open(sys.argv[1]))["wait"]["kind"] in ("human","resource") else "no")' "$LEMVO_PROGRESS_RECORD")"
+# Read final state, not the state loaded before the model worked.
+POST_STATE=$(mktemp); helper prepare > "$POST_STATE" || exit 4
+. "$POST_STATE"; rm -f "$POST_STATE"
 SETTLE=$(mktemp); helper settle > "$SETTLE" || { rm -f "$SETTLE"; say "Accounting failed; preserving output and queued inputs."; emit_reason "ACCOUNTING"; exit 4; }
 . "$SETTLE" 2>/dev/null || true; rm -f "$SETTLE"
 parse_usage "$TD/engine-stdout.jsonl" "${CUR_SID:-none}"
@@ -1549,6 +1588,7 @@ export T_ART
 SESSION_TAG=$(cat "$SID_FILE" 2>/dev/null || echo none)
 TURN_F=$(mktemp)
 T_TYPE="work-turn"; [ "${NEW_PROGRESS:-no}" != "yes" ] && T_TYPE="prep-turn"
+[ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["kind"])' "$LEMVO_PROGRESS_RECORD")" = waiting ] && T_TYPE="wait-assessment"
 [ "$LEMVO_TURN_INTERRUPTED" = yes ] && T_TYPE="runtime-interrupted"
 T_PREP="${PREP_TURNS_NOW:-unknown}"; T_TOTAL="${TOTAL_TURNS_NOW:-unknown}"
 T_SCOPE="client-estimate;modelUsage=$U_MU;engine=$ENGINE"
@@ -1604,17 +1644,18 @@ say "本轮 rc=$rc；NEW_PROGRESS=${NEW_PROGRESS:-?}（类型化凭据=${ARTIFAC
 
 # ── BUG-3：空转/毒会话检测（引擎 rc=0 也会空转——礼貌 loop 无产物无进展）──
 # NEW_ARTIFACT 已在引擎结束时判定（不含账本/控制器写入）
+PROGRESS_NEUTRAL=$(python3 -c 'import json,sys; print("yes" if json.load(open(sys.argv[1]))["neutral"] else "no")' "$LEMVO_PROGRESS_RECORD") || exit 4
 if [ "${LEMVO_TURN_INTERRUPTED:-no}" = yes ]; then
   : # Neither increment nor reset research counters for an unfinished turn.
-elif [ -z "$NEW_ARTIFACT" ] && [ "${NEW_PROGRESS:-no}" != "yes" ] && [ "${LEMVO_PROGRESS_INCOMPLETE:-no}" != yes ] && [ "${LEMVO_WAIT_ASSESSMENT:-no}" != yes ]; then
-  STALL_N=$(( $(cat .autoloop-stall-count 2>/dev/null || echo 0) + 1 )); echo "$STALL_N" > .autoloop-stall-count
-elif [ -n "$NEW_ARTIFACT" ] || [ "${NEW_PROGRESS:-no}" = yes ]; then
+elif [ "${NEW_PROGRESS:-no}" = yes ]; then
   echo 0 > .autoloop-stall-count; echo 0 > .autoloop-poison-count
+elif [ "$PROGRESS_NEUTRAL" != yes ]; then
+  STALL_N=$(( $(cat .autoloop-stall-count 2>/dev/null || echo 0) + 1 )); echo "$STALL_N" > .autoloop-stall-count
 fi
 # 毒会话：连续 N 轮输出含阻塞话术且零产物 → 清 SID 强制新会话（避免 resume
 # 复读污染上下文）；短语可经 LEMVO_POISON_PHRASES 覆盖（| 分隔的 grep -E 模式）
 POISON_RE="${LEMVO_POISON_PHRASES:-只读|read.only|READY_TO_PROBE.*不满足|ready_blocker}"
-if [ "${LEMVO_TURN_INTERRUPTED:-no}" != yes ] && [ -z "$NEW_ARTIFACT" ] && [ "${LEMVO_PROGRESS_INCOMPLETE:-no}" != yes ] && [ "${LEMVO_WAIT_ASSESSMENT:-no}" != yes ] && grep -qiE "$POISON_RE" "$TD/engine-stdout.jsonl" 2>/dev/null; then
+if [ "$PROGRESS_NEUTRAL" != yes ] && [ "${NEW_PROGRESS:-no}" != yes ] && grep -qiE "$POISON_RE" "$TD/engine-stdout.jsonl" 2>/dev/null; then
   POISON_N=$(( $(cat .autoloop-poison-count 2>/dev/null || echo 0) + 1 )); echo "$POISON_N" > .autoloop-poison-count
   if [ "$POISON_N" -ge "${LEMVO_POISON_N:-3}" ]; then
     OLD_SID=$(cat "$SID_FILE" 2>/dev/null || true)
@@ -1626,7 +1667,7 @@ if [ "${LEMVO_TURN_INTERRUPTED:-no}" != yes ] && [ -z "$NEW_ARTIFACT" ] && [ "${
   fi
 fi
 # 零产物空转兜底闸门：连续 N 轮（默认 5）无任何项目产物 → 明确决策点，不礼貌空转
-if [ "${LEMVO_TURN_INTERRUPTED:-no}" != yes ] && [ -z "$NEW_ARTIFACT" ] && [ "${NEW_PROGRESS:-no}" != "yes" ] && [ "${LEMVO_PROGRESS_INCOMPLETE:-no}" != yes ] && [ "${LEMVO_WAIT_ASSESSMENT:-no}" != yes ] && [ "${STALL_N:-0}" -ge "${LEMVO_STALL_ARTIFACT_N:-5}" ]; then
+if [ "$PROGRESS_NEUTRAL" != yes ] && [ "${NEW_PROGRESS:-no}" != yes ] && [ "${STALL_N:-0}" -ge "${LEMVO_STALL_ARTIFACT_N:-5}" ]; then
   say "连续 $STALL_N 轮零产物（引擎 rc=0 但无建设输出）——空转停滞，转决策点待人查"
   emit_reason "STALL_NO_ARTIFACT"
   SB=$(mktemp); printf '{"type":"stall-no-artifact","turn_id":"%s","turns":%d,"ts":"%s"}\n' \
@@ -1639,6 +1680,9 @@ if [ "${LEMVO_TURN_INTERRUPTED:-no}" != yes ] && [ -z "$NEW_ARTIFACT" ] && [ "${
 fi
 
 RESULT_STATUS="succeeded"; RESULT_NEXT="continue"
+POST_GATE=$(mktemp); helper block-check > "$POST_GATE" || exit 4
+. "$POST_GATE"; rm -f "$POST_GATE"
+case "$GATE_KIND" in human) RESULT_NEXT=needs_user;; hard) RESULT_NEXT=paused;; resource) RESULT_NEXT=waiting_jobs;; done) RESULT_NEXT=completed;; esac
 if [ "$rc" -ne 0 ]; then
   RESULT_STATUS="failed"; RESULT_NEXT="runtime_error"
 fi

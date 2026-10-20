@@ -53,6 +53,13 @@ authorization apply. At safe phase boundaries, checkpoint and return if new
 `.lemvo-steer-queue/q-*.md` guidance is waiting, so the controller can deliver it.
 Only the controller acknowledges/archives queue files.
 
+Human waits and replies use one runtime contract: `WAITING_USER` waits without
+model calls; new guidance gets one reply-handling turn, not new resource
+permission. Real engineering changes count as execution progress without
+requiring a new metric. For scoped instruction replacement and explicit
+progress paths, use the commands in [runtime-recovery.md](references/runtime-recovery.md).
+
+
 ## 路由表（本环境的执行层）
 
 ## 实验路线菜单（判据可验证，裁决在 orchestrator）

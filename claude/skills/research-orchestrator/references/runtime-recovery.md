@@ -1,7 +1,7 @@
 # Runtime operation and recovery
 
 Use the installed entry point directly. Do not copy the two shell files to a
-separate directory: they ship with `runtime-support.py`, and a detached copy
+separate directory: they ship with `runtime-support.py` and `runtime-contract.py`, and a detached copy
 will not receive later skill updates.
 
 ```bash
@@ -46,12 +46,66 @@ cause an infinite wait. Unknown does not mean the experiment failed.
 `LEMVO_WAIT_RECHECK_SEC` (default 900 seconds), with the timer saved across
 controller restarts. Pending user guidance or a completed-job receipt can wake it
 earlier. Normal waiting polls use no model calls. The assessment does not grant
-new resources or permit duplicate jobs. Explicit STOP/HOLD/BLOCKED-USER still apply.
+new resources or permit duplicate jobs. Explicit STOP/PAUSED still prevent dispatch;
+human HOLD/BLOCKED-USER follows the reply contract below.
 An actual resource reassessment that remains WAITING_RESOURCE records its model
 usage and total call count, but does not count as a stagnant research/preparation
 turn. Repeated waiting is an operational condition, not a negative research result.
 
 ## Guidance delivery and long turns
+
+### Human waiting and replies
+
+Set `campaign_status: WAITING_USER` when a human decision is actually needed.
+Optionally add `runtime_wait.question_id` and `runtime_wait.question` to identify
+the question; otherwise the runner assigns a stable ID. HOLD, EVIDENCE_HOLD,
+BLOCKED, BLOCKED_USER/BLOCKED-USER and STOPPED_INCONCLUSIVE use the same human-wait
+contract. A higher-priority STOP/STOPPED/PAUSED remains a hard pause.
+
+While waiting, the controller creates no model calls, research turns or prep/stall
+increments. A new steer or explicit `advance` permits one reply-handling turn.
+If resolved, update the waiting fields and remove only the resolved HOLD or
+BLOCKED-USER marker; if unresolved, retain the wait and state the missing decision
+once. Receiving a reply does not itself authorize GPU work, spending, downloads
+or changes to global constraints. In guided mode a new steer also grants one
+guided turn, after which the controller waits again.
+
+```bash
+bash /installed/templates/lemvo-run.sh status /project
+bash /installed/templates/lemvo-run.sh steer /project reply.md --reply-to wait-IDENTITY
+```
+
+An explicitly mismatched `--reply-to` stays queued, without waking the wrong
+question. Legacy unscoped messages still reach a human-wait assessment. Runtime
+completion is recorded separately from `next_action`: a successful reply-handling
+call can still end in `needs_user`. The three-line `turns/<id>/runtime-summary.md`
+and `.lemvo-last-turn.json` carry the runtime result, evidence/log paths and next
+action into the next call. They do not judge a hypothesis.
+
+### Scoped instruction versions
+
+Plain `steer /project message.md` remains append-only guidance. For a continuing
+task that replaces an earlier task, explicitly name the scope and replaced ID:
+
+```bash
+bash /installed/templates/lemvo-run.sh steer /project assess.md --id assess-v1 --scope implementation
+bash /installed/templates/lemvo-run.sh steer /project build.md --id build-v2 --scope implementation --supersedes assess-v1
+```
+
+IDs are immutable and unique. Supersession must name an existing current
+instruction in the same scope. Global/constraints/authorization/safety scopes
+cannot be superseded through this task shortcut. Use the existing explicit
+authorization/constraint-change procedure instead. No last-message-wins policy
+is applied to unrelated work or resource boundaries.
+
+The controller activates replacements at the turn boundary and stores the exact
+revision in `instructions.json` and the turn manifest. A mid-turn message does not
+change the in-flight snapshot. Superseded queued messages are archived as
+`superseded`, not falsely marked `delivered`, only after the carrying turn
+succeeds; failed delivery keeps the files. `.lemvo-instructions.json` retains the
+active named directives across resumes/restarts, and prompts identify them so old
+conversation history does not reactivate replaced work. Ordinary unversioned
+messages are not repeated forever as active directives.
 
 `steer /project /absolute/path/message.md` publishes an immutable message.
 `.lemvo-delivery.jsonl` records queued, submitted and delivered with message_id
@@ -210,7 +264,7 @@ monitor producer health. Existing launch constraints remain in the research plan
 a tmux session or `nohup bash /installed/templates/lemvo-run.sh start /project
 --engine claude --mode unattended > /project/lemvo-controller.log 2>&1 < /dev/null &`.
 Do not treat a terminal's session lifetime as the campaign lifetime.
-`doctor` checks all three runtime files, including the helper; startup saves the
+`doctor` checks all four runtime files, including the contract helper; startup saves the
 invoked bundle hashes in `.lemvo-runtime-at-start.json`. During deployment compare
 that record, the actual process invocation and installed hashes. Updating files
 does not prove an existing process switched versions. Migrate only at a safe
@@ -223,3 +277,35 @@ does not reset liveness. New code, analysis and evidence count as construction;
 an observed negative result is still evidence. A liveness pause requests a concrete
 next action or runtime repair, never a declaration that the idea is false.
 GPU hours and model dollars retain the existing statistics-only default.
+
+### One progress record for engineering and research
+
+`turns/<id>/progress.json` is the shared input to prep and stall accounting.
+Runnable code, configuration, launchers, literature/analysis notes and experiment
+evidence can be construction progress; no new metric, novelty proof or significance
+test is required to continue implementation. Job registration with a verified
+PID/starttime, and matching terminal result JSON, are recorded once as job
+transitions. Negative experimental results remain useful evidence.
+
+Record the useful file in `prep.last_informative_artifact`; do not write
+`last_artifact_sha`, which is an acknowledgement owned by the runner. A model
+writing that legacy field cannot cancel a real before/after change. For a deep,
+excluded or external implementation file, register it **before** editing:
+
+```bash
+bash /installed/templates/lemvo-run.sh track /project /authorized/fork/model.py
+```
+
+Registration is not an access grant and does not duplicate the file. Explicit
+hashing is bounded by `LEMVO_EXPLICIT_HASH_BYTES` (64 MiB) and
+`LEMVO_EXPLICIT_HASH_SEC` (2 seconds) per file; larger files should supply a compact
+result/manifest. Late registration without an earlier baseline is unknown, not
+invented progress; the next turn will capture its baseline. Unknown inspection,
+human/resource waiting and interrupted calls do not increment stagnation.
+
+The accepted baseline is `.lemvo-progress-accepted.json`, not agent-written state.
+Same-content rewrites, bookkeeping-only changes, polls and merely receiving
+steer do not reset counters. File changes measure execution progress, not
+scientific quality; do not generate filler notes to keep a loop alive. Total
+turns, wall time, token/USD/GPU statistics and authorization caps remain cumulative.
+A no-progress stop is displayed as `STALLED`, not mislabeled budget exhaustion.

@@ -66,12 +66,12 @@ research_plan:
 
 # 准备循环总账（跨会话/重启/后端累计；重命名 phase/slug 不清零）
 prep:
-  prep_turns: 0                  # 距上次【有信息量观测】的准备轮数——重置须有 artifact 背书（见 last_informative_artifact），纯文字变化不重置
+  prep_turns: 0                  # 距上次【可核对工程推进或有信息量观测】的准备轮数——重置须有 artifact 背书（见 last_informative_artifact），纯文字变化不重置
   prep_wall_time_min: 0.0        # 准备阶段墙钟估计（人工/引擎维护；脚本只维护 total 节）
   prep_cost: null                # 可取得的 token/费用估计
   last_informative_observation: ""  # 上次有效进展是什么（何时）——描述性文字
-  last_informative_artifact: none  # 进展凭据文件路径（eval json/带数字的笔记）；settle 用其内容哈希判定真进展
-  last_artifact_sha: none        # 上次结算时凭据文件的 sha256（防 touch/重写无内容变化的伪进展）
+  last_informative_artifact: none  # 有用的代码/配置/脚本/分析/实验文件；由运行器核对前后变化
+  last_artifact_sha: none        # 运行器维护的上次结算 SHA；agent 不填写，避免抵消本轮真实变更
   ready_blocker: ""              # 未就绪的具体阻塞 + 解除条件
   next_min_probe: ""             # 就绪后的最小真实 probe 描述
   session_id: null               # 外层循环续接会话 id（按项目持久化）
