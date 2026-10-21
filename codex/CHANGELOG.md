@@ -1,6 +1,6 @@
 # CHANGELOG — codex-for-research
 
-## 2026-10-21 — Constructive ideation handoffs (candidate)
+## 2026-10-21 — Constructive ideation handoffs
 
 - Carry source operations/conditions, actual parent code and scoped observations
   from ideation into Forge/Autoresearch implementation; reuse existing records.
@@ -11,6 +11,10 @@
   fixed novelty/effect thresholds, new skills or compulsory diagnostic stages.
 - Add CPU regression coverage. This is an interface change, not a demonstrated
   increase in research success; no automatic migration of running campaigns.
+- Align generated Forge programs with the same development contract: retain
+  measured small gains, reuse authorized setup, and keep evaluation integrity
+  separate from editable training operations. Ordinary repairs do not require
+  another protocol or approval round.
 
 
 ## 2026-10-21 — Runtime failure accounting follow-up
