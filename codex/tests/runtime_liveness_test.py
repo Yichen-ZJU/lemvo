@@ -50,7 +50,12 @@ class Liveness(unittest.TestCase):
         self.env = dict(os.environ, ENGINE='claude', CLAUDE_BIN=str(self.fake),
                         LEMVO_RC_MODE='structured', LEMVO_POLL_SEC='0.05',
                         TURN_GAP_SEC='0', LEMVO_WAIT_RECHECK_SEC='0.25',
-                        LEMVO_UNKNOWN_JOB_SEC='0.25')
+                        LEMVO_UNKNOWN_JOB_SEC='0.25',
+                        # This suite bounds waits to 8s. The production in-turn
+                        # watchdog polls every 5s; two settled turns legitimately
+                        # exceed that bound. Accelerate only the fixture clock,
+                        # not acknowledgement/queue assertions or production defaults.
+                        LEMVO_TURN_POLL_SEC='0.03')
 
     def state(self, status='ACTIVE'):
         (self.p/'research-state.yaml').write_text('campaign_status: '+status+'\n'
