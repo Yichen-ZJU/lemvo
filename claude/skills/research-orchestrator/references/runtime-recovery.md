@@ -171,6 +171,14 @@ neither increment nor reset prep/stall/poison counters. Partial files remain for
 the next turn to inspect. A timeout marker also prevents orphan recovery from
 mistaking an interrupted turn for successful delivery.
 
+An ordinary nonzero CLI exit also remains a runtime error, not a stagnant
+research turn. It neither increments nor clears prep/stall/poison counters.
+Partial files remain available for inspection, without accepting a successful
+progress baseline. Runtime retries remain bounded by the existing failure policy;
+this does not automatically impose a human HOLD on every recoverable tool error.
+Waiting and runtime-error receipts participate in cumulative usage/cost
+baselines, so changing a turn category cannot make the next turn charge it again.
+
 Streaming/cancellation semantics: [Claude headless documentation](https://code.claude.com/docs/en/headless)
 and [Codex non-interactive documentation](https://developers.openai.com/codex/noninteractive).
 

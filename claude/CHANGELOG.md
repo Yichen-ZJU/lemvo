@@ -1,5 +1,17 @@
 # CHANGELOG — claude-for-research
 
+## 2026-10-21 — Runtime failure accounting follow-up
+
+- Ordinary nonzero CLI exits no longer increment or clear prep/stall/poison
+  counters. Preserve partial files, guidance and usage, without accepting an
+  incomplete turn as a successful progress baseline.
+- Waiting and runtime-error categories now participate in same-session
+  cumulative cost deltas; a category change cannot charge the earlier turn again.
+- Missing USD fields are inserted into the budget section, never appended under
+  GPU statistics; ledger deltas and state totals are both regression-checked.
+- Added crash/counter/receipt and waiting/error cumulative-cost regressions.
+  No resource caps, research gates or blanket engineering bypass were added.
+
 ## 2026-10-20 — Runtime wait, construction and instruction contracts
 
 - Human waiting states share one gate: no model polling; a reply/advance allows

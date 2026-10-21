@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 单轮适配器 v4.13：等待/唤醒闭环、统一建设进展与指令版本（2026-10-20）
+# 单轮适配器 v4.14：等待/唤醒闭环、统一建设进展与指令版本；失败轮不记科研停滞
 #  v4.8 变更（对 v4.7，均带隔离回归）：
 #  费用政策（用户决定 2026-10-14）：USD 费用默认只统计、不停止、不缩实验、
 #    不否定方向；金额停止门仅当 budget.cap_authorized: yes（真实用户明确授权、
@@ -67,7 +67,7 @@
 set -uo pipefail
 # One version source: write_helper emits this marker into the generated Python.
 # Bump on helper changes so existing project-local helpers migrate exactly once.
-HELPER_VERSION="4.13"
+HELPER_VERSION="4.14"
 RUNTIME_SUPPORT="$(cd "$(dirname "$0")" && pwd)/runtime-support.py"
 RUNTIME_CONTRACT="$(cd "$(dirname "$0")" && pwd)/runtime-contract.py"
 [ -f "$RUNTIME_SUPPORT" ] || { echo "Missing runtime-support.py: install the complete research-orchestrator skill."; exit 64; }
@@ -351,10 +351,12 @@ def cmd_budget_add():
         used = 0.0
     used = round(used + incf, 6)
     LINES = open(STATE, encoding="utf-8").read().splitlines()
-    set_in("budget", "used", used)
+    # Missing budget fields must be inserted before the next top-level section,
+    # never appended under whichever section happens to end the YAML document.
+    set_section_key(LINES, "budget", "used", used)
     cap = num_or_none(b["total_cap"])
     if cap is not None:
-        set_in("budget", "remaining", round(cap - used, 6))
+        set_section_key(LINES, "budget", "remaining", round(cap - used, 6))
     open(STATE, "w", encoding="utf-8").write("\n".join(LINES) + "\n")
     print("BUDGET_USED_NOW=" + str(used))
 
@@ -823,7 +825,7 @@ def cmd_cost_delta():
         # r29-fix3 P1-1：reader 兼容旧字符串快照（writer 曾写 "3"）——
         # 可解析为有限数则采用，bool/非数拒收；不清零旧账。
         for ev in ledger_events():
-            if ev.get("type") in ("work-turn", "prep-turn", "recovered-turn", "runtime-interrupted") and ev.get("sid") == sid:
+            if ev.get("type") in ("work-turn", "prep-turn", "recovered-turn", "runtime-interrupted", "runtime-error", "wait-assessment") and ev.get("sid") == sid:
                 v = ev.get("cost_usd_reported")
                 if isinstance(v, str):
                     try:
@@ -1359,6 +1361,8 @@ if os.path.exists(os.path.join(td, "timeout.json")):
     obj["runtime_reason"] = "turn-timeout"
 elif os.environ.get("LEMVO_TURN_INTERRUPTED") == "yes":
     obj["runtime_reason"] = "turn-interrupted"
+elif status == "failed" and rcv not in ("", "0", "None"):
+    obj["runtime_reason"] = "engine-error"
 progress_path = os.path.join(td, "progress.json")
 if os.path.isfile(progress_path):
     progress = json.load(open(progress_path))
@@ -1556,6 +1560,7 @@ fi
 # ── 8) 结算（凭据类型化 + 真账 + usage 分列 + 费用 delta 口径）──
 PROGRESS_ARGS=()
 [ "${LEMVO_TURN_INTERRUPTED:-no}" = yes ] && PROGRESS_ARGS+=(--interrupted)
+[ "$rc" -ne 0 ] && PROGRESS_ARGS+=(--failed)
 python3 "$RUNTIME_CONTRACT" progress-end "$TD" "${PROGRESS_ARGS[@]}" >/dev/null || exit 4
 export LEMVO_PROGRESS_RECORD="$TD/progress.json"
 export LEMVO_WAIT_ASSESSMENT="$(python3 -c 'import json,sys; print("yes" if json.load(open(sys.argv[1]))["wait"]["kind"] in ("human","resource") else "no")' "$LEMVO_PROGRESS_RECORD")"
@@ -1589,6 +1594,7 @@ SESSION_TAG=$(cat "$SID_FILE" 2>/dev/null || echo none)
 TURN_F=$(mktemp)
 T_TYPE="work-turn"; [ "${NEW_PROGRESS:-no}" != "yes" ] && T_TYPE="prep-turn"
 [ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["kind"])' "$LEMVO_PROGRESS_RECORD")" = waiting ] && T_TYPE="wait-assessment"
+[ "$rc" -ne 0 ] && T_TYPE="runtime-error"
 [ "$LEMVO_TURN_INTERRUPTED" = yes ] && T_TYPE="runtime-interrupted"
 T_PREP="${PREP_TURNS_NOW:-unknown}"; T_TOTAL="${TOTAL_TURNS_NOW:-unknown}"
 T_SCOPE="client-estimate;modelUsage=$U_MU;engine=$ENGINE"

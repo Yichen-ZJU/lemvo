@@ -369,7 +369,7 @@ def progress_begin(td):
             'accepted':load('.lemvo-progress-accepted.json', {'files':{},'jobs':{}})})
 
 
-def progress_end(td, interrupted=False):
+def progress_end(td, interrupted=False, failed=False):
     td = Path(td)
     before = load(td/'progress-before.json', {})
     after = load(td/'progress-before.json.after', {})
@@ -392,14 +392,15 @@ def progress_end(td, interrupted=False):
                    if explicit.get('jobs',{}).get(k)!=v and accepted.get('jobs',{}).get(k)!=v]
     wait = state()
     progress = bool(changes or job_changes)
-    neutral = interrupted or wait['kind'] in ('human','hard','resource','done') or unknown
-    kind = ('interrupted' if interrupted else 'construction' if changes else 'job-transition' if job_changes
+    incomplete_turn = interrupted or failed
+    neutral = incomplete_turn or wait['kind'] in ('human','hard','resource','done') or unknown
+    kind = ('interrupted' if interrupted else 'runtime-error' if failed else 'construction' if changes else 'job-transition' if job_changes
             else 'waiting' if wait['kind'] in ('human','hard','resource') else 'unknown' if unknown else 'none')
-    record = {'schema':1,'turn_id':td.name,'kind':kind,'progress':progress and not interrupted,
+    record = {'schema':1,'turn_id':td.name,'kind':kind,'progress':progress and not incomplete_turn,
               'neutral':neutral,'changes':changes,'job_changes':job_changes,'wait':wait,
               'scientific_verdict':None}
     atomic(td/'progress.json', record)
-    if not interrupted:
+    if not incomplete_turn:
         accepted.setdefault('files',{}).update(current)
         accepted.setdefault('jobs',{}).update(jobs)
         atomic('.lemvo-progress-accepted.json', accepted)
@@ -431,7 +432,7 @@ def main():
     elif cmd=='freeze': freeze(args[0])
     elif cmd=='track': track(args)
     elif cmd=='progress-begin': progress_begin(args[0])
-    elif cmd=='progress-end': progress_end(args[0], '--interrupted' in args)
+    elif cmd=='progress-end': progress_end(args[0], '--interrupted' in args, '--failed' in args)
     elif cmd=='receipt': receipt(args[0])
     else: raise ValueError('Unknown contract operation')
 

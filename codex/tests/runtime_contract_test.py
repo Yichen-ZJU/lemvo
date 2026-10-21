@@ -35,7 +35,10 @@ if os.environ.get('FAKE_JOB_PID'):
 class Contracts(base.Liveness):
     def setUp(self):
         super().setUp()
-        self.fake.write_text(base.FAKE.replace("event={'type':'result'", EXTRA+"\nevent={'type':'result'"))
+        fake=base.FAKE.replace("event={'type':'result'", EXTRA+"\nevent={'type':'result'")
+        fake=fake.replace("if kind!='no-usage':", "if os.environ.get('FAKE_COST'):event['total_cost_usd']=float(os.environ['FAKE_COST'])\nif kind!='no-usage':")
+        fake+="\nif os.environ.get('FAKE_EXIT'):sys.exit(int(os.environ['FAKE_EXIT']))\n"
+        self.fake.write_text(fake)
         self.env.update(LEMVO_TURN_POLL_SEC='.02')
         self.contract=base.TEMPLATES/'runtime-contract.py'
 
@@ -318,6 +321,64 @@ m.snapshot()
         self.assertEqual(self.prep(),0)
         self.assertEqual(json.loads((td/'result.json').read_text())['next_action'],'needs_user')
         self.assertEqual(json.loads((td/'progress.json').read_text())['kind'],'construction')
+
+    def test_cli_nonzero_exit_preserves_counters_guidance_and_receipt(self):
+        self.state()
+        self.assertEqual(self.adapter().returncode,0)
+        (self.p/'.autoloop-poison-count').write_text('1')
+        before=(self.p/'.lemvo-progress-accepted.json').read_text()
+        self.queue('implement pending work','crash-task')
+        r=self.call('advance',FAKE_EXIT='1',FAKE_ARTIFACT='src/partial.py')
+        self.assertEqual(r.returncode,1,r.stdout)
+        self.assertEqual(self.prep(),1)
+        self.assertEqual((self.p/'.autoloop-stall-count').read_text().strip(),'1')
+        self.assertEqual((self.p/'.autoloop-poison-count').read_text().strip(),'1')
+        self.assertEqual((self.p/'.lemvo-progress-accepted.json').read_text(),before)
+        self.assertTrue((self.p/'src/partial.py').is_file())
+        self.assertEqual(len(list((self.p/'.lemvo-steer-queue').glob('*.md'))),1)
+        failed=[p.parent for p in (self.p/'turns').glob('*/result.json')
+                if json.loads(p.read_text())['status']=='failed'][0]
+        self.assertEqual(len((failed/'runtime-summary.md').read_text().splitlines()),3)
+        result=json.loads((failed/'result.json').read_text())
+        self.assertEqual(result['runtime_reason'],'engine-error')
+        self.assertEqual(result['next_action'],'runtime_error')
+        rows=[json.loads(x) for x in (self.p/'.autoloop-prep-ledger.jsonl').read_text().splitlines()]
+        self.assertEqual(sum(x.get('type')=='runtime-error' for x in rows),1)
+
+    def test_wait_assessment_cost_baseline_is_continuous(self):
+        self.state('WAITING_USER')
+        for cost in ('1','3','4'):
+            self.assertEqual(self.call('advance',FAKE_COST=cost).returncode,0)
+        rows=[json.loads(x) for x in (self.p/'.autoloop-prep-ledger.jsonl').read_text().splitlines()]
+        deltas=[x['cost_usd_delta'] for x in rows if x.get('type')=='wait-assessment']
+        self.assertEqual(deltas,[1,2,1])
+        self.assertEqual(self.prep(),0)
+
+    def test_runtime_error_cost_baseline_is_continuous(self):
+        self.state()
+        self.assertEqual(self.adapter(FAKE_COST='1',FAKE_ARTIFACT='src/a.py').returncode,0)
+        self.assertEqual(self.adapter(FAKE_COST='3',FAKE_EXIT='1').returncode,1)
+        self.assertEqual(self.adapter(FAKE_COST='4',FAKE_ARTIFACT='src/b.py').returncode,0)
+        rows=[json.loads(x) for x in (self.p/'.autoloop-prep-ledger.jsonl').read_text().splitlines()]
+        deltas=[x['cost_usd_delta'] for x in rows if x.get('type') in ('work-turn','runtime-error')]
+        self.assertEqual(deltas,[1,2,1])
+        self.assertEqual(self.prep(),0)
+
+    def test_missing_budget_fields_stay_in_currency_section(self):
+        self.state('WAITING_USER')
+        state=self.p/'research-state.yaml'
+        state.write_text(state.read_text().replace('total_cap: null','total_cap: 20')+
+                         'gpu_usage:\n  used_hours: 7\n  basis: measured\n')
+        for amount in ('1','3','4'):
+            self.assertEqual(self.call('advance',FAKE_COST=amount).returncode,0)
+        text=state.read_text()
+        budget=re.search(r'(?ms)^budget:\n(.*?)(?=^\S|\Z)',text).group(1)
+        self.assertRegex(budget,r'(?m)^  used: 4\.0$')
+        self.assertRegex(budget,r'(?m)^  remaining: 16\.0$')
+        gpu=re.search(r'(?ms)^gpu_usage:\n(.*?)(?=^\S|\Z)',text).group(1)
+        self.assertIn('  used_hours: 7\n',gpu)
+        self.assertNotRegex(gpu,r'(?m)^  (used|remaining):')
+        self.assertEqual(len(re.findall(r'(?m)^  used:',text)),1)
 
 
 if __name__=='__main__':
