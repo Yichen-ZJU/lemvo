@@ -22,7 +22,9 @@ Session files: `autoresearch.md`, `autoresearch.sh`, `autoresearch.jsonl`, `resu
 父 commit 与有范围的已有结果（`../shared-references/grounded-ideation.md` 的实现交接）。
 开改前核对当前代码确实包含所选父方法；不静默从旧基线重做。结果返回外循环时
 带实现 commit/记录引用，区分运行错误、开发收益与确认结论，并给出具体下一版改动
-或暂存理由。保留有效父版本，不要求所有场景先通过，也不把预测写成结果。
+或暂存理由。按共享接口的“历史事实与新设计”“研究记忆”处理报告与更正：实际
+消费操作不等于文件保存内容，更正同步替换当前相关陈述而非仅追加勘误。
+保留有效父版本和原测量，不要求所有场景先通过，也不把预测写成结果。
 
 **契约单一来源**：results.tsv 表头、循环边界、crash/revert、Guard、min_delta、日志命名的权威定义在 `experiment-forge/references/contract.md`。本文件与契约冲突时以契约为准。
 
