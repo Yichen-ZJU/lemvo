@@ -6,6 +6,7 @@ python3 tests/queue_state_test.py
 python3 tests/queue_integration_test.py  # real screen/process chain (E04 guard), skips if no screen
 python3 tests/queue_namespace_test.py     # real screen namespace coexistence (E05), skips if no screen
 python3 tests/ideation_blindtest_fixture_test.py  # grounded-ideation blindtest fixture (no model)
+python3 tests/construction_context_test.py  # real context renderer; no model or GPU
 python3 tests/runtime_policy_test.py  # real adapter, isolated CPU stubs
 python3 tests/runtime_liveness_test.py  # controller/adapter lifecycle, no model or GPU
 python3 tests/runtime_scalability_test.py  # controller/adapter lifecycle, no model or GPU

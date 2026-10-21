@@ -376,6 +376,12 @@ When a researcher asks for help with creative thinking or novel ideation:
 
 Mechanism-grounded candidate handoff (structure-mapping → candidate card with falsifiable prediction): `../shared-references/grounded-ideation.md`.
 
+Use these lenses to produce an implementable change, not another review checklist. When
+building on an existing method, preserve its full mechanism, actual code base and scoped
+results; turn a specific weakness into a concrete revision. Related candidates should differ
+in an operation or learning/information path, not just wording. Simple improvements remain
+valid, and no fixed effect size, novelty score or new information source is required to try.
+
 **Key Principles**:
 - Generative mode first, evaluative mode second — do not filter prematurely
 - Fit to the current bottleneck outranks domain distance — a nearby mechanism that genuinely solves the problem beats a distant analogy that needs heavy adaptation

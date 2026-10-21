@@ -18,6 +18,12 @@ argument-hint: <idea>
 
 Session files: `autoresearch.md`, `autoresearch.sh`, `autoresearch.jsonl`, `results.tsv`, `run-<N>.log`.
 
+**继承方法而非只继承标题**：收到候选交接时读取其源方法必要条件、具体代码改动、
+父 commit 与有范围的已有结果（`../shared-references/grounded-ideation.md` 的实现交接）。
+开改前核对当前代码确实包含所选父方法；不静默从旧基线重做。结果返回外循环时
+带实现 commit/记录引用，区分运行错误、开发收益与确认结论，并给出具体下一版改动
+或暂存理由。保留有效父版本，不要求所有场景先通过，也不把预测写成结果。
+
 **契约单一来源**：results.tsv 表头、循环边界、crash/revert、Guard、min_delta、日志命名的权威定义在 `experiment-forge/references/contract.md`。本文件与契约冲突时以契约为准。
 
 ## 两种运行模式

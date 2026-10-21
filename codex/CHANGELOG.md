@@ -1,5 +1,18 @@
 # CHANGELOG — codex-for-research
 
+## 2026-10-21 — Constructive ideation handoffs (candidate)
+
+- Carry source operations/conditions, actual parent code and scoped observations
+  from ideation into Forge/Autoresearch implementation; reuse existing records.
+- Add a read-only context renderer: explicit same-candidate/scope corrections
+  separate current interpretations from history, without deleting measurements.
+  Ambiguous links and legacy Markdown remain readable, never a permission gate.
+- Offer repair/transfer/composition/objective/information design moves, without
+  fixed novelty/effect thresholds, new skills or compulsory diagnostic stages.
+- Add CPU regression coverage. This is an interface change, not a demonstrated
+  increase in research success; no automatic migration of running campaigns.
+
+
 ## 2026-10-21 — Runtime failure accounting follow-up
 
 - Ordinary nonzero CLI exits no longer increment or clear prep/stall/poison

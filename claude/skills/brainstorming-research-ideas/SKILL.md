@@ -119,6 +119,13 @@ Borrowing structural ideas from other disciplines is one of the most generative 
 
 Mechanism-grounded construction interface (source mapping, candidate card, experiment handoff): `../shared-references/grounded-ideation.md` — on-demand, not a mandatory phase.
 
+When revising an existing idea, carry its full mechanism, parent implementation and scoped
+observations forward. Choose a useful construction move (repair, transfer, complementary
+combination, objective/representation change, or information/search change), not a quota of
+brainstorming lenses. Name the code-level difference; retain the useful parent if a revision
+is worse. Prior-work overlap is reusable material, not an automatic veto. If there is no
+credible next modification, park the tested version rather than endlessly auditing it.
+
 **Requirements for a Valid Analogy**:
 - **Structural fidelity**: The mapping must hold at the level of underlying mechanisms, not just surface similarity
 - **Non-obvious connection**: A well-known link is a lower-novelty signal

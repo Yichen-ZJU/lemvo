@@ -56,6 +56,11 @@ argument-hint: <task-description>
 
 ## Forge 流程
 
+已有候选时，把交接中的源机制必要条件、具体改动、父代码 commit 和相关结果引用
+写入 program.md 的任务背景；实施者拿到的不只是研究标题。优先基于选定父实现
+造包，核对实际代码起点；没有这些可选字段不拦新任务。交接方式见
+`../shared-references/grounded-ideation.md`，不重新启动整套构思/审判流程。
+
 1. 问清：任务目标、指标+方向、**比较口径**（等时间/等 updates/等数据量/训练到约定收敛，r29 A4）、资源 envelope 与 kill 阈值、运行命令、**可编辑范围**（哪些文件开放/锁定，r29 A5）、**依赖授权**（预授权清单还是禁止变更）、GPU 需求。
 2. 生成目录结构；`prepare.py`/`train.py` 优先从用户现有代码改造（把评估逻辑抽进锁定文件），不要从零发明。
 3. 用 `templates/program.md` 生成 `program.md`，替换所有 `<PLACEHOLDER>`。

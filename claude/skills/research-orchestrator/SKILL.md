@@ -255,6 +255,14 @@ ACTIVE"不得触发下一轮 continue；支线停止或 pivot 时**累计准备�
 
 ## 近邻存在 ≠ 否决（Neighbors are not a veto）
 
+**建设交接**：选定/修订候选后，把已有 source_refs、源方法必要条件、具体改动、
+父代码 commit 与有 scope 的结果一起交给实施端，别只转发标题。已有候选记录可用
+`../shared-references/scripts/construction_context.py` 只读渲染（JSON/Markdown 均可），
+把输出实际注入 Forge/Autoresearch 的工作上下文；小改动用两三句直接交接即可。
+外循环优先把观察转成可实施的子版本，保留有效父方法；没有可信修订可暂存，
+不强制无限修复。汇总先读同一候选范围的显式更正，不能让已撤回否决复活。
+具体设计操作与格式兼容见下列共享参考，不另起调研/审核流程。
+
 文献门/评审发现近邻或竞品**不是关闭课题的理由**，是触发 delta 声明的信号
 （缺口定位与跨域机制检索的构思接口见
 `../shared-references/grounded-ideation.md`，按需取用，不要求每次加载）：
