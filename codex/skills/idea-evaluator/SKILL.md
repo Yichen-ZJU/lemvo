@@ -38,7 +38,7 @@ Mechanism-grounded ideation handoff (gap finding / cross-domain mechanism / cand
 
 - The user has a draft idea and asks whether it is worth pursuing.
 - The user asks for novelty check, feasibility assessment, or scoring.
-- Before the user commits to a paper scope or starts implementation.
+- Before the user commits to a paper scope, when they request that appraisal.
 - The user is comparing two or three candidate ideas and needs a
   structured trade-off.
 - The user suspects scope creep and wants an external check.
@@ -63,6 +63,9 @@ Mechanism-grounded ideation handoff (gap finding / cross-domain mechanism / cand
 
 ## When NOT to use this skill
 
+- The user asks to build or improve a runnable method rather than appraise an
+  idea. Hand the candidate to the orchestrator's development loop; do not
+  insert a reviewer verdict between an authorized small trial and execution.
 - The user has already implemented the idea and is writing the paper.
   Use `intro-drafter`, `tech-paper-template`, or
   `benchmark-paper-template` (separate plugin) instead.
