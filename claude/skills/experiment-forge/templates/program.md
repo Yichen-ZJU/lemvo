@@ -23,18 +23,18 @@ evaluator/protocol of an in-flight loop is never edited silently inside
 that loop.
 
 
-This repo is an autonomous research task. You (the agent) are the researcher. The human sets the direction; you run experiments indefinitely until interrupted.
+This repo is an autonomous research task. You (the agent) are the researcher. Continue within the authorized scope and loop bounds below.
 
 ## Setup
 
-1. **Agree on a run tag** with the human: propose one from today's date (e.g. `jul26`). The branch `autoresearch/<tag>` must not already exist — this is a fresh run.
-2. **Create the branch**: `git checkout -b autoresearch/<tag>`.
+1. **Use the handed-off run identity** when resuming. For a new run, choose an unused tag (e.g. today's date); do not ask again when the orchestrator has authorized this batch.
+2. **Create the branch for a new run**: `git checkout -b autoresearch/<tag>`. Resume an existing run on its recorded branch without reinitializing its ledger.
 3. **Read the in-scope files** for full context:
-   - `<LOCKED_FILE>` — data prep, evaluation, fixed constants. **Do not modify.**
+   - `<LOCKED_FILE>` — fixed evaluation, evaluation split/ground truth, and declared constants. **Do not modify.** Training data selection, augmentation and collation may be editable when included in the declared scope below.
    - `<OPEN_FILE(S)>` — the file(s) you modify, per the task's declared editable scope. <OPEN_FILE_DESCRIPTION, e.g. "model, optimizer, training loop" — the task may open additional training-pipeline files (model/data/augmentation modules); everything declared editable is fair game>.
 4. **Verify prerequisites**: <DATA/ENV CHECK, e.g. "data shards exist at ~/.cache/<task>/ — if not, tell the human to run `<PREP_COMMAND>`">.
-5. **Initialize results.tsv** with just the header row (the baseline is recorded after the first run).
-6. Confirm setup looks good, then kick off experimentation.
+5. **Initialize results.tsv for a new run** with just the header row (the baseline is recorded after the first run). Preserve an existing run's results.
+6. Start the authorized batch once prerequisites are met. An existing orchestrator authorization does not need a second setup confirmation.
 
 ## Experimentation
 
@@ -49,7 +49,7 @@ Fixed wall-clock is one optional protocol, not a universal fairness standard —
 - Modify `<OPEN_FILE(S)>` — the task's declared editable training-pipeline scope. Everything declared editable is fair game: <EXAMPLES: architecture, optimizer, hyperparameters, batch size, ...>.
 
 **What you CANNOT do:**
-- Modify `<LOCKED_FILE>`. It is read-only — it contains the fixed evaluation and data pipeline (protected evaluation integrity).
+- Modify `<LOCKED_FILE>`. It is read-only — it protects the declared evaluation and ground truth; editable training-pipeline files remain governed by the scope above.
 - Install packages silently. Dependency changes go through the task's pre-authorized procedure: <DEPENDENCY_POLICY, e.g. "declare package+version; install in the isolated env" or "no changes — use only what's in <DEPENDENCY_FILE>">. Network, cost and data boundaries still apply.
 - Modify the evaluation harness. `<EVAL_FUNCTION>` is the ground truth metric.
 
@@ -57,7 +57,7 @@ Fixed wall-clock is one optional protocol, not a universal fairness standard —
 
 **Resources** are a soft constraint: some increase is acceptable for meaningful gains, no blow-ups.
 
-**Simplicity criterion**: all else equal, simpler is better. Weigh complexity cost against improvement magnitude. A tiny improvement that adds hacky complexity is not worth keeping; equal results with less code is a win — keep it.
+**Simplicity criterion**: equal results with a simpler implementation may be kept. Record complexity and resource costs alongside measured gains; they do not create an undeclared minimum-effect bar. Small gains follow the min_delta rule below.
 
 **The first run** is always the unmodified baseline.
 
@@ -85,14 +85,14 @@ iteration	timestamp	commit	metric	delta	guard	status	move	description
 2. timestamp (ISO8601 UTC)
 3. git commit hash (short, 7 chars)
 4. metric achieved — leave EMPTY for crash/timeout/metric-error rows (never write a fabricated 0 as a score; r29 A6)
-5. delta vs previous keep (empty for baseline and for empty-metric rows)
+5. delta vs the frozen eval_baseline (empty for baseline and for empty-metric rows); code retention separately compares with best_value in the same evaluation namespace
 6. guard: `pass` / `fail` / `na`
 7. status: `keep`, `discard`, `crash`, `timeout`, `metric-error`, `no-op`, `blocked` — `timeout` = execution abort (NOT a scientific negative); `metric-error` = output parse/adapter mismatch (NOT a crash)
 8. move: `follow` / `reverse` / `switch` / `escalate` / `simplify` / `baseline`
 9. short description of what this experiment tried
 
 The full schema and loop rules live in one place: see the experiment
-loop contract (`experiment-forge/references/contract.md`). If this
+loop contract (`references/contract.md` inside this package). If this
 template ever disagrees with the contract on package-internal technical
 conventions, the contract wins (scope per contract header).
 
@@ -112,8 +112,8 @@ LOOP up to <MAX_ITERATIONS (default 50)> iterations and within <TIMEOUT, e.g. 12
 7. **Guard** (if `<GUARD_COMMAND>` configured): run it every iteration; on failure revert regardless of metric and record `guard-fail`.
 8. **min_delta** (if configured): improvements smaller than `<MIN_DELTA>` trigger a confirmation run (re-run 1–2×, take the median). min_delta is a **confirmation trigger, not a keep bar** (r29 A7): if the median still favors the change, KEEP it and record the confirmation status — a small positive signal is never erased for being below an arbitrary absolute number. Only a task/user-declared "minimum practical effect" may gate keeps, and only when explicitly declared in this program.
 9. Record in results.tsv (do NOT commit results.tsv — leave it untracked).
-10. Metric improved → keep the commit, the branch advances.
-11. Metric equal/worse → `git revert HEAD --no-edit` (NOT reset — failed experiments stay in history so future iterations can learn what doesn't work).
+10. Metric improves on best_value in the declared direction, with Guard passing → keep the commit, the branch advances. Equal results with a simpler implementation may also be kept.
+11. Otherwise → `git revert HEAD --no-edit` (NOT reset — failed experiments stay in history so future iterations can learn what doesn't work). A result better than eval_baseline but below the current best remains a measured improvement in the ledger, without replacing the best implementation.
 
 **Timeout**: if a run exceeds <KILL_THRESHOLD, e.g. 2× the protocol duration>, kill it and record status `timeout` — an execution abort, NOT a scientific negative (r29 A4). Under an equal-wall-clock comparison basis it additionally means the run is not comparable under this protocol (note the protocol-discard in the description); under other bases, fix and re-run or continue under the outer loop's authorization.
 

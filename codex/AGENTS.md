@@ -45,8 +45,12 @@ Research library with 114 skills, including the research-orchestrator double loo
 
 ## Research discipline (mandatory)
 
-- Protocol commits BEFORE data access (git history is the preregistration audit trail).
-- Confirmatory vs exploratory labeling; negative results are progress.
+- Freeze and commit a confirmatory protocol before its new outcome data. For development,
+  reuse the current evaluation contract and record each candidate's intent, comparator and
+  code change before the comparison; ordinary code repair and local smoke checks do not
+  require a new protocol or approval round. Preserve the git/results chronology.
+- Label exploratory and confirmatory evidence separately. Record negative results with
+  their tested version and conditions; an inconclusive comparison does not refute a method family.
 - Sanity-check before analysis; no silent sample drops; unparsed/truncated classified honestly.
 - No API keys in any repo or output.
 - Long jobs (>5 min) in independent tmux/nohup with logs and completion markers; background processes die with the session.

@@ -11,7 +11,7 @@ argument-hint: <task-description>
 
 ```
 <task-dir>/
-├── prepare.py        # 🔒 锁定：数据准备、tokenizer/dataloader、评估函数。agent 禁止修改（评估真实性保护）
+├── prepare.py        # 🔒 锁定：评估划分、ground truth、评估函数（评估真实性保护）
 ├── train.py          # 🔓 开放：默认开放文件（模型、优化器、训练循环、超参）
 ├── program.md        # 🧭 人类可迭代：给 agent 的研究组织指令（用 templates/program.md 生成）
 ├── pyproject.toml    # 依赖清单 —— 变更须走任务契约的预授权流程（声明包+版本、隔离环境安装）
@@ -26,11 +26,11 @@ argument-hint: <task-description>
 
 1. **比较口径（按研究问题选择，r29 A4）**：等 wall-clock / 等 updates（步数）/ 等数据量（tokens）/ 训练到约定收敛——Forge 时与研究问题一起选定并写进 program.md。固定时长只是可选协议之一（适合"固定算力下谁更好"的问题），不是普适公平标准；更慢但效果更好的方法不能仅因跑得慢记科学失败。
 2. **架构无关指标**：指标必须对架构改动公平（karpathy 用 val_bpb 而非 loss，因为 loss 随 vocab size 变）。问用户："换个架构/分词器/特征，这个指标还可比吗？"不可比就换指标。
-3. **评估代码锁定**：评估函数、数据加载、随机种子控制放在锁定文件里，是 ground truth。
+3. **评估代码锁定**：评估函数、评估集加载/划分与评估随机性控制放在锁定文件里，保护 ground truth；训练数据选择、增强和 collator 按本任务开放范围处理。
 4. **失控作业护栏**：超过 kill 阈值（如 ~2× 协议时长）的运行 kill 掉，记为**执行中断（timeout）**——不是方法否证；在"等时间"协议下它同时意味着该次不可比（协议性 discard），其他口径下修复后重跑或按外循环授权继续。
 5. **VRAM/资源软约束**：允许合理增长，不允许爆炸。
 6. **首跑必基线**：第一次运行必须是不改任何代码的 baseline。
-7. **简洁性准则**：同等效果更简为赢；0.001 提升加 20 行 hack 不值得。
+7. **简洁性准则**：同等效果更简可保留；复杂度与资源代价随收益记录，不另造最小效果门。小正信号按下面 min_delta 规则处理。
 8. **Guard 防回归**：配一条每轮必须通过的安全命令（如冒烟测试 `pytest -x tests/smoke`）。指标涨但 Guard 挂 → 照样 revert（保护可运行分支），失败先定位工程原因，重试上限只约束当前批次，不构成方向否证。
 9. **min_delta 确认跑（追加测量触发器，r29 A7）**：改进幅度小于阈值 → 重跑 1-2 次取中位数确认方向一致性；复测后同向小正信号**保留**（keep，确认状态照记），不因"没到某个绝对数"抹掉。只有任务/用户显式声明了"最小实用效应"时，才按该声明决定是否保留。
 
@@ -49,7 +49,7 @@ argument-hint: <task-description>
 ## Git 即台账
 
 - 每次运行开专支：`autoresearch/<tag>`（tag 用日期，如 `jul26`）
-- 每次实验一个 commit；指标改进 → 分支前进（keep）；持平/变差 → `git revert HEAD --no-edit`（discard，**失败保留在历史里供学习，不用 reset**）；崩溃 → 记 `crash`；超时 → 记 `timeout`（执行中断，不是科学否证——r29 A4），在等时间协议下额外注明协议性 discard； Guard/解析失败与科学成绩分开记录（r29 A6）
+- 每次实验一个 commit；按既定方向优于 best_value 或同等效果且实现更简、Guard 通过 → 分支前进（keep）；其余 → `git revert HEAD --no-edit`（discard，**失败保留在历史里供学习，不用 reset**）。相对 eval_baseline 的收益另记，不与当前最佳混用；崩溃 → 记 `crash`；超时 → 记 `timeout`（执行中断，不是科学否证——r29 A4）；Guard/解析失败与科学成绩分开记录（r29 A6）。
 **契约单一来源（包内技术约定）**：任务包生成与 autoresearch 执行共用 `references/contract.md`（results.tsv 9 列表头、循环边界、crash/revert、Guard、min_delta、日志命名）；模板或本文与契约在这些**包内技术约定**上冲突时以契约为准。契约不覆盖人类权限、批准资源上限与全局阶段语义（见 contract.md 头部优先级范围与 research-orchestrator/references/constraint-governance.md）。
 
 - `results.tsv` **不提交 git**，列（与 autoresearch 执行器一致）：`iteration timestamp commit metric delta guard status move description`（TAB 分隔，逗号会在描述里断掉）

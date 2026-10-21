@@ -244,12 +244,16 @@ ACTIVE"不得触发下一轮 continue；支线停止或 pivot 时**累计准备�
 ## 研究纪律（强制执行）
 
 - **先锁后跑**：protocol 必须先 commit 再跑实验 —— git 历史即预注册，证明计划先于结果存在。protocol commit 和 results commit 永不合并。
+  同一开发循环可复用既有评测契约：每个候选用实施 commit 与现有实验台账
+  记录改动意图、比较对象和指标，再跑比较即可；局部工程自检随修改完成，
+  不为每次修 bug 或小步迭代重造一套 protocol/审批。确认性比较仍按其冻结设计执行。
 - **confirmatory vs exploratory**：预注册只证明计划先于结果存在，**不等于
   confirmatory**——按预注册 protocol 跑的**开发/探索**实验仍是 exploratory；
   confirmatory 只来自确认设计（独立确认单位 + 适用功效/稳定性规划 +
   预注册判据）。确认状态看证据设计，不看文件提交先后。执行中意外发现的
   是 exploratory —— 有趣但要更怀疑。
-- **阴性结果是进展**：记录它排除了什么、暗示了什么。
+- **阴性结果按范围留证**：记录实际测量、对应版本/条件以及可改变的下一步。
+  未确认或测量不充分不等于排除机制；一次负比较不替未测试版本下结论。
 - **分析前先 sanity check**：训练收敛了吗？baseline 复现了吗？数据加载对吗？（抽查几个样本）
 - **commit 规范**：`research(init|protocol|results|reflect|paper): {简述}`，有意义的进展才 commit。
 
