@@ -251,6 +251,18 @@ GPU 小时与模型费用默认用于统计；用户明确授权的限额、准�
 
 </details>
 
+## 单服务器研究控制台
+
+在一个本地页面查看多个 Claude / Codex 会话、项目实验与服务器资源。区分等待回复、工具请求、加载和训练计数；长时间等待会提示关注，不自动中断实验。对已有 Lemvo 常驻控制器，还可启用模式切换与指导投递。
+
+```bash
+python3 console/install.py
+~/.local/bin/lemvo-console start
+~/.local/bin/lemvo-console url
+```
+
+通过 SSH 端口转发打开页面；监控使用普通程序，不消耗模型调用。[安装、Windows 访问与功能范围](console/README.zh-CN.md)。
+
 ## 仓库结构与项目记忆
 
 ```text

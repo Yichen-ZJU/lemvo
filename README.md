@@ -251,6 +251,18 @@ Implementation: [Claude controller](claude/skills/research-orchestrator/template
 
 </details>
 
+## Single-server research console
+
+Observe multiple Claude / Codex conversations and registered experiments from one local dashboard. The console distinguishes user-wait, tool requests, loading and training counters, and flags long unresolved waits without automatically interrupting experiments. It also offers optional mode switching and guidance for an existing Lemvo controller.
+
+```bash
+python3 console/install.py
+~/.local/bin/lemvo-console start
+~/.local/bin/lemvo-console url
+```
+
+Open the server's URL through SSH port forwarding. Monitoring uses ordinary code, with no model polling. [Setup, Windows access and coverage](console/README.md).
+
 ## Repository layout and project memory
 
 ```text
