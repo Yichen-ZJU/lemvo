@@ -215,6 +215,22 @@ class ObservationTests(BaseFixture):
         self.assertTrue(all(x['job_ids']==[] for x in s['sessions']))
         self.assertTrue(all(x['health']=='waiting' for x in s['sessions']))
 
+    def test_explicit_project_binding_does_not_leak_to_shared_threads(self):
+        logs=[]
+        for name in ('one','two'):
+            path=self.root/(name+'.jsonl')
+            path.write_text(json.dumps({'type':'session_meta','payload':{'id':name,'cwd':str(self.home)}})+'\n')
+            logs.append(str(path))
+        self.store.register(str(self.project),{'id':'binding-one','engine':'codex','pid':111,
+            'pid_start':'22','session_id':'one','transcript':logs[0]})
+        collector=Collector(self.store,self.home)
+        collector.processes.items={111:dict(self.proc.items[111],args=['codex','app-server'])}
+        with patch.object(collector.processes,'scan'),patch.object(collector.processes,'transcripts',return_value=logs),patch.object(collector.processes,'env',return_value={}),patch('lemvo_console.collector.tmux_panes',return_value={}),patch.object(collector,'hardware',return_value={}):
+            snapshot=collector.collect()
+        projects={s['session_id']:s['project'] for s in snapshot['sessions']}
+        self.assertEqual(projects['one'],str(self.project))
+        self.assertEqual(projects['two'],str(self.home))
+
     def test_registered_real_process_is_unchanged_by_collection(self):
         child = subprocess.Popen([sys.executable, '-c', 'import time;time.sleep(60)'])
         self.child.append(child)

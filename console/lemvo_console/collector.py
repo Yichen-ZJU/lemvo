@@ -344,7 +344,14 @@ class Collector:
             for path in paths or [None]:
                 meta = self.meta(path) if path else {}
                 sid = meta.get('session_id') or hint
-                project = meta.get('project') or (registered[0]['project'] if registered else p['cwd'])
+                # Explicit attachment overrides a CLI's home-directory cwd, but only
+                # for that conversation, not all threads sharing its backend process.
+                binding = next((r for r in registered if
+                    (path and r.get('transcript') == path) or
+                    (sid and r.get('session_id') == sid)), None)
+                if binding is None and len(paths) <= 1 and len(registered) == 1:
+                    binding = registered[0]
+                project = (binding.get('project') if binding else None) or meta.get('project') or p['cwd']
                 if not Path(project).is_dir():
                     project = p['cwd']
                 project = str(Path(project).resolve())
