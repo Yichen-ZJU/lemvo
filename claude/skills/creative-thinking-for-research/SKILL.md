@@ -1,6 +1,6 @@
 ---
 name: creative-thinking-for-research
-description: Applies cognitive science frameworks for creative thinking to CS and AI research ideation. Use when seeking genuinely novel research directions by leveraging combinatorial creativity, analogical reasoning, constraint manipulation, and other empirically grounded creative strategies.
+description: Applies cognitive science frameworks to CS and AI research ideation, from extending existing work to developing new directions through combination, analogy, problem reformulation, and constraint manipulation.
 version: 1.0.0
 author: Orchestra Research
 license: MIT
@@ -14,7 +14,7 @@ Eight empirically grounded frameworks from cognitive science, applied to compute
 
 ## When to Use This Skill
 
-- Generating genuinely novel ideas, not incremental extensions of prior work
+- Developing ideas from incremental extensions of existing work, new combinations, or changes of approach
 - Feeling trapped in a local optimum of thinking within a single subfield
 - Wanting to systematically apply creativity heuristics rather than waiting for inspiration
 - Preparing for a research retreat or PhD-level ideation session
@@ -26,6 +26,13 @@ Eight empirically grounded frameworks from cognitive science, applied to compute
 - You need a literature survey (use `scientific-skills:literature-review`)
 
 **Relationship to Brainstorm skill**: The brainstorm skill provides operational workflows (diverge → converge → refine) and practical filters. This skill provides the deeper cognitive engines that power creative leaps. Use them together: creative-thinking to generate raw insight, brainstorm to structure and evaluate it.
+
+Existing work is a legitimate starting point. Choose whether to extend it, combine
+mechanisms, transfer to another setting, or change direction based on the current
+bottleneck, prospective value, implementation cost and experimental feedback,
+within the user's goal and run mode. Neither incremental improvement nor a
+paradigm shift is mandatory. Judge overlap by actual operations and conditions;
+do not invent a novelty claim for a change that merely renames existing work.
 
 ---
 
@@ -343,7 +350,7 @@ Any idea that survives all four phases and passes the two-sentence test is worth
 | **Fixation** | Cannot stop thinking about the problem one way | Problem Reformulation (F2) — force a different representation |
 | **Tunnel vision** | All ideas come from the same subfield | Bisociation (F1) or Analogical Reasoning (F3) — import from elsewhere |
 | **Self-censoring** | Dismissing ideas as "too weird" before exploring | Negation (F5) — weird is the point; evaluate after generating |
-| **Incrementalism** | Every idea is "+2% on benchmark X" | Constraint Manipulation (F4) — change the rules, not the parameters |
+| **Unproductive local search** | Repeated small changes no longer address the bottleneck or teach anything useful | Constraint Manipulation (F4) can open another route; continue incremental work when its expected value or observed progress warrants it |
 | **Analysis paralysis** | Too many options, cannot commit | Adjacent Possible (F7) — what is feasible right now? |
 | **False dichotomy** | Stuck choosing between two approaches | Janusian Thinking (F8) — seek synthesis, not selection |
 

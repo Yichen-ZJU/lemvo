@@ -1,6 +1,6 @@
 ---
 name: brainstorming-research-ideas
-description: Guides researchers through structured ideation frameworks to discover high-impact research directions. Use when exploring new problem spaces, pivoting between projects, or seeking novel angles on existing work.
+description: Guides structured research ideation, including incremental extensions of existing work, combinations, and new directions. Use when developing a half-formed idea, exploring a problem space, or seeking a better approach to a current bottleneck.
 version: 1.0.0
 author: Orchestra Research
 license: MIT
@@ -11,6 +11,10 @@ dependencies: []
 # Research Idea Brainstorming
 
 Structured frameworks for discovering the next research idea. This skill provides ten complementary ideation lenses that help researchers move from vague curiosity to concrete, defensible research proposals. Each framework targets a different cognitive mode—use them individually or combine them for comprehensive exploration.
+
+An incremental extension of existing work is a valid starting point. Select the
+route that serves the user's goal and current bottleneck; use evidence and
+development results to decide whether to refine it, combine it, or change approach.
 
 ## When to Use This Skill
 
@@ -37,7 +41,7 @@ Research ideas originate from two distinct modes. Knowing which mode you are in 
 **Problem-First** (pain point → method):
 - Start with a concrete failure, bottleneck, or unmet need
 - Naturally yields impactful work because the motivation is intrinsic
-- Risk: may converge on incremental fixes rather than paradigm shifts
+- Risk: may stay with local changes after they stop addressing the bottleneck; useful incremental fixes remain legitimate
 
 **Solution-First** (new capability → application):
 - Start with a new tool, insight, or technique seeking application
@@ -49,12 +53,12 @@ Research ideas originate from two distinct modes. Knowing which mode you are in 
 2. Classify it: Is this problem-first or solution-first?
 3. If problem-first → verify the problem matters (who suffers? how much?)
 4. If solution-first → identify at least two genuine problems it addresses
-5. For either mode, articulate the gap: what cannot be done today that this enables?
+5. For either mode, articulate the gap: what capability, quality, cost, reliability, or operating condition could this improve over the closest work?
 
 **Self-Check**:
 - [ ] Can I name a specific person or community who needs this?
-- [ ] Is the problem I am solving actually unsolved (not just under-marketed)?
-- [ ] If solution-first, does the solution create new capability or just replicate existing ones?
+- [ ] What specific limitation or unmet need remains under the target conditions, even if the broader task already has solutions?
+- [ ] If solution-first, what would the approach add over existing work: capability, quality, cost, reliability, or understanding? An unchanged replication can establish a baseline, but is not a new-method contribution.
 
 ---
 
@@ -329,12 +333,12 @@ tasks may keep the single best candidate and move on.
 
 Apply these filters to each candidate:
 
-| Filter | Question | Kill Criterion |
+| Filter | Question | Constructive next action |
 |--------|----------|----------------|
-| **Explain-It Test** (F10) | Can I state this in two sentences? | If no → restate it once; still unclear → park with a one-line note |
-| **Problem-First Check** (F1) | Is the problem genuine and important? | If no one suffers from this → park it (record why), do not delete |
+| **Explain-It Test** (F10) | Can I state this in two sentences? | If unclear → help identify the useful part and a concrete change or comparison; park only when no worthwhile next step is apparent |
+| **Problem-First Check** (F1) | Is the problem genuine and important? | Identify a remaining limitation and who or what research question benefits; if none is credible, park with the reason |
 | **Simplicity Test** (F7) | Is the complexity justified? | If a simpler approach works → simplify or park |
-| **Stakeholder Check** (F8) | Who benefits? Who might object? | If no clear beneficiary → park it and record the gap; do not silently drop |
+| **Stakeholder Check** (F8) | Who benefits? Who might object? | Clarify practical or scientific value; if still unsupported, park it and record the gap |
 | **Feasibility** | Can I execute this with available resources? | If clearly infeasible → park it for later, or file a scoped resource request |
 
 Parked ideas stay on the written candidate list with their park reason —
@@ -388,7 +392,7 @@ Not sure which framework to start with? Use this decision guide:
 | Pitfall | Symptom | Fix |
 |---------|---------|-----|
 | **Novelty without impact** | "No one has done X" but no one needs X | Apply Problem-First Check (F1) |
-| **Incremental by default** | Idea is +2% on a benchmark | Climb the Abstraction Ladder (F2) |
+| **Unproductive local search** | Successive tweaks no longer address the bottleneck or produce useful information | Consider the Abstraction Ladder (F2); retain valuable incremental progress |
 | **Complexity worship** | Method has 8 components, each helping marginally | Apply Simplicity Test (F7) |
 | **Echo chamber** | All ideas come from reading the same 10 papers | Use Cross-Pollination (F4) |
 | **Stale assumptions** | "This was tried and didn't work" (5 years ago) | Apply What Changed (F5) |

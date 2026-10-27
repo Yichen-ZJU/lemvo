@@ -98,7 +98,11 @@ flaw, cite the detection rule, and recommend a concrete defense.
 
 **Short-circuit rule.** If any fatal flaw is tagged CRITICAL in the
 severity taxonomy (single-handedly causes rejection, unfixable
-within the lifecycle), stop here and emit the verdict directly:
+within the lifecycle), ground that classification in concrete evidence
+and the considered revision path before taking the shortcut. Unverified
+overlap, a provisional delta, or missing evaluator evidence is not a
+CRITICAL flaw. For a genuinely established CRITICAL flaw, emit the
+verdict directly:
 
 - Verdict: Reject and Pivot **for the affected claim** (scope the
   rejection to the exact claim the CRITICAL flaw kills; the method

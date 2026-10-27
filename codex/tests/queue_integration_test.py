@@ -29,11 +29,13 @@ if not shutil.which("screen"):
     sys.exit(0)
 
 tmp = tempfile.mkdtemp(prefix="eq-int-")
+# Keep concurrent engine suites in distinct real screen namespaces.
+meta = {"project": "integration", "run_id": Path(tmp).name}
 
 def run_real(cmd, job_id, max_wait=30):
     """Launch a real screen job via the real launch_job; poll to terminal."""
     job = {"id": job_id, "attempts": 0, "cmd": cmd}
-    qn, pid = qm.launch_job(job, 0, "base", tmp, tmp, qm.resolve_conda_hook())
+    qn, pid = qm.launch_job(job, 0, "base", tmp, tmp, qm.resolve_conda_hook(), meta=meta)
     final = None
     for _ in range(max_wait):
         time.sleep(1)

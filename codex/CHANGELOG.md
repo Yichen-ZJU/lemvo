@@ -1,5 +1,17 @@
 # CHANGELOG — codex-for-research
 
+## 2026-10-28 — Incremental ideation and route choice
+
+- Allow incremental extensions of existing work as a starting point; the research
+  agent chooses refinement, composition, transfer or a new direction from the
+  goal, expected value, implementation cost and development feedback.
+- Compare actual operations and conditions rather than names; preserve scoped
+  novelty claims and help half-formed candidates become concrete next steps.
+- Keep provisional deltas eligible for exploration and align the dispatched
+  literature verifier with that policy. No new skill or review gate.
+- Give the real-process queue regression fixture a unique run namespace so
+  concurrent engine suites cannot terminate each other's test sessions.
+
 ## 2026-10-21 — Constructive ideation handoffs
 
 - Carry source operations/conditions, actual parent code and scoped observations

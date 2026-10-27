@@ -68,9 +68,10 @@ partial output and continue inline rather than repeatedly spawning the same work
    constraint-governance.md）。
 
 **审计接口（verifier 阶段执行）**：对照 orchestrator 的"近邻不否决"与
-"探索许可"规则检查调研产出的结论表——任何因"已有人做过/仅是重组"而
-不晋级的候选，必须是违反了 delta 四要件（写不出增量），而不是违反了
-"无人做过"这类不存在的要求。发现此类误杀要在 verifier 报告中点名。
+"探索许可"规则检查调研产出的结论表——不得仅因"已有人做过/仅是重组"而
+淘汰候选。增量暂不清楚时，帮助限定一个暂定改动或直接对照；delta 四要件
+可待核，不作材料完整性门槛。只有经具体比较仍无值得实施的差异或下一步，
+才说明停放该版本的理由；不把它扩大为整个方向无效。发现误杀要在报告中点名。
 
 ## 定向构思接口（按需，非必执行）
 
@@ -190,7 +191,7 @@ If direct search/no researcher subagents was chosen:
 
 If researcher subagents were used, run the `verifier` agent after the draft exists. This step is mandatory and must complete before any reviewer runs. Do not run the `verifier` and `reviewer` in the same parallel batch:
 
-`Agent(subagent_type="verifier", prompt="Add inline citations to outputs/.drafts/<slug>-draft.md using the research files outputs/.drafts/<slug>-research-*.md as source material. Verify every URL. ALSO audit the conclusion table against the reusable-assets contract: any candidate rejected merely because 'someone did it before / it is only a recombination' must be flagged as a misbuild (the bar is an articulable delta, not novelty of the family); transferable recipes logged only as blockers must be flagged; for topic scans, check the recipe & necessity comparison covers its eight sub-dimensions and that claimed recipe costs cite actually-reported resources. Write the complete cited brief (with the misbuild audit appended as a final section) to outputs/.drafts/<slug>-cited.md.")`
+`Agent(subagent_type="verifier", prompt="Add inline citations to outputs/.drafts/<slug>-draft.md using the research files outputs/.drafts/<slug>-research-*.md as source material. Verify every URL. ALSO audit the conclusion table against the reusable-assets contract: any candidate rejected merely because 'someone did it before / it is only a recombination' must be flagged as a misbuild; a provisional delta or bounded comparison can develop the idea, without a complete candidate card or family-level novelty. Check concrete operations and conditions before calling a proposal redundant; transferable recipes logged only as blockers must be flagged. For topic scans, check the recipe & necessity comparison covers its eight sub-dimensions and that claimed recipe costs cite actually-reported resources. Write the complete cited brief (with the misbuild audit appended as a final section) to outputs/.drafts/<slug>-cited.md.")`
 
 If the verifier subagent cannot run the misbuild audit (context limits), the lead agent performs it directly on `<slug>-cited.md` before the reviewer step — the audit is mandatory along the actual call chain, not optional.
 

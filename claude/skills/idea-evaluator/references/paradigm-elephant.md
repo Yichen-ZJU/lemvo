@@ -103,7 +103,10 @@ and inside the corner cases where current methods fail silently.
   valuable to the practitioner but is not research-grade.
 - **One-off failures**: a single viral bug is not an elephant.
 - **Already-formalised problems**: if the literature already has a
-  subfield for this, the elephant has been captured. Move on.
+  subfield for this, do not claim to be the first to formalise it. For
+  this particular new-problem lens, consider another candidate; the
+  existing problem remains open to method improvements, new conditions,
+  combinations, or better explanations where they add real value.
 - **Pain-points that are solvable by the next model release**: if
   scaling alone is expected to solve it, the reframing is premature.
 - **Elephants outside the user's reach**: some elephants require
