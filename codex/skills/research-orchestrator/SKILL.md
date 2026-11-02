@@ -427,3 +427,7 @@ research-state.yaml 的 supported / refuted / inconclusive 字段承担全部
 ## 产出约定
 
 遵循全局 CLAUDE.md：provenance 落盘、验证状态诚实标注（verified/unverified/blocked/inferred）、不编造来源与结果。
+
+## Windows workstation and SSH execution
+
+When research decisions run on Windows and experiments run on SSH hosts, use the [desktop dispatch reference](../remote-compute-ssh/references/windows-desktop.md). The initial desktop bridge uses Codex on both sides; it is optional alongside the existing Claude and Codex server workflows. It provides unattended local sessions and safe Windows/server handoff while preserving the remote project state and existing Lemvo runtime. Linux runtime helpers execute on the selected server.

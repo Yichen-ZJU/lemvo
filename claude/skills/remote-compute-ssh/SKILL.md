@@ -16,3 +16,7 @@ Workflow:
 5. Mark failed or partial jobs honestly; do not fabricate remote artifacts from local expectations.
 
 Keep remote credentials and private paths out of user-facing summaries unless they are needed for reproducibility.
+
+## Windows workstation and SSH execution
+
+When research decisions run on Windows and experiments run on SSH hosts, use the [desktop dispatch reference](references/windows-desktop.md). The initial desktop bridge uses Codex on both sides; it is optional alongside the existing Claude and Codex server workflows. It provides unattended local sessions and safe Windows/server handoff while preserving the remote project state and existing Lemvo runtime. Linux runtime helpers execute on the selected server.

@@ -290,3 +290,9 @@ To update, run `git pull` in your clone and rerun the installer for your engine.
 Original content is released under MIT; see the [Claude license](claude/LICENSE) and [Codex license](codex/LICENSE). Third-party components retain their own licenses. The vendored ARS in `academic-research-suite` (© Cheng-I Wu) is **CC BY-NC 4.0**, for non-commercial use; see the component's license files for details.
 
 <sub>Thanks to [autoresearch](https://github.com/karpathy/autoresearch), [Feynman](https://github.com/Companion-Inc/feynman), and [AI Research Skills](https://github.com/Orchestra-Research/AI-Research-SKILLs). Further sources are documented in the engine directories and component files.</sub>
+
+## Windows decisions, SSH experiments
+
+Use Windows as a persistent decision workstation: local Codex CLI sessions advance research while experiments and authoritative records remain on SSH Linux hosts. One background worker can supervise registered projects on multiple servers. Before shutting down Windows, complete a safe handoff to server Codex; training continues in place.
+
+This optional entrypoint currently uses Codex on both sides. Provider selection is separate from guided/unattended mode; existing server workflows remain available. See the [desktop dispatch guide](desktop/README.md) for installation, registration, and handoff commands.

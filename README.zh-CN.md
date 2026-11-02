@@ -290,3 +290,9 @@ lemvo/
 本仓原创内容以 MIT 发布，见 [Claude LICENSE](claude/LICENSE) 与 [Codex LICENSE](codex/LICENSE)。第三方组件保留各自许可证；`academic-research-suite` 中的 vendored ARS（© Cheng-I Wu）以 **CC BY-NC 4.0** 发布，仅限非商业使用，详情见其目录内许可文件。
 
 <sub>感谢开源仓库：[autoresearch](https://github.com/karpathy/autoresearch)、[Feynman](https://github.com/Companion-Inc/feynman) 和 [AI Research Skills](https://github.com/Orchestra-Research/AI-Research-SKILLs)。更多组件来源见各引擎目录与原始文件。</sub>
+
+## Windows 调度与 SSH 实验
+
+Windows 也可以作为持续运行的决策端：本地 Codex CLI 自动推进研究，训练与研究记录仍留在 SSH 服务器。一个后台调度程序可管理多个服务器上的已注册项目。准备关机时，先完成向服务器 Codex 的安全交接；训练无需重启。
+
+此入口目前支持两侧 Codex，独立于半自动／全自动模式选择。已有服务器工作方式保持兼容。安装、项目注册与交接命令见 [Windows 调度指南](desktop/README.md)。
