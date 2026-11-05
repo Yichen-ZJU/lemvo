@@ -6,15 +6,11 @@ argument-hint: <topic>
 
 # Deep Research
 
-## 按问题规模执行
+> **触发纪律（不可绕过）**：本 skill 已被 Skill 工具正式加载——调研类任务（深度调研/文献综述/方向扫描/选题论证）必须走完本管线的 Step 1-7，禁止绕过（不用 Skill 加载、自己 WebSearch 拼报告 = 违规，全局 CLAUDE.md 有同文约定）。冒烟级小问答才允许不走本管线。
 
-完整 Step 1-7 用于用户要求的系统性深调研、独立综述或多来源综合报告。
-实验中的定向查证、寻找一个可用配方、补读最近邻和已有综述更新走轻量路径：
-直接读相关来源，把可用机制/代码、关键来源、适用条件及下一步写入现有研究记录，
-随后回到实施。不生成 plan/draft/cited/review 五套文件，不启动完整审核链。
-方向扫描也按实际范围选择，不因任务名称自动升级。判断依据是本次问题，而非
-加载了本技能就必须走完整流程。承重声明仍需对应原文支持；未读到全文就限定
-该声明，不把整个实验冻结。下面的 Required Artifacts 和 Step 1-7 仅适用于完整路径。
+Run a thorough, source-heavy investigation on the user's topic and produce a durable research brief with inline citations.
+
+This is an execution request, not a request to explain or implement the workflow instructions. Execute the workflow. Do not answer by describing the protocol. Your first actions should be tool calls that create directories and write the plan artifact.
 
 ## Dispatch preference
 
@@ -38,12 +34,12 @@ partial output and continue inline rather than repeatedly spawning the same work
 - Subagents: the `Agent` tool with `subagent_type` of `researcher`, `verifier`, `reviewer`. Spawn independent subagents in a single message so they run in parallel. Subagent final messages are short summaries — real output is written to files on disk.
 - Ask the user: `AskUserQuestion` for choices, or plain text and wait.
 
-## 完整深调研的协作选项（按需要使用）
+## 强化模式（经 deep-2 实战验证，深调研默认执行）
 
 - **.plans 分工**：写计划后立即为每个 researcher 写 brief（`outputs/.plans/<slug>-T1.md` 等），多段指令放 brief、Agent prompt 保持短；一条消息并行 spawn 全部 researcher。
 - **承重声明亲核**：子代理无 MCP 工具时，关键论文的全文下载与声明核查由主代理用 arxiv MCP 执行（`download_paper` + `search_paper_text` 定位原文段落），不接受转述定承重结论。
 - **逐候选/逐方向占位检索**：每个候选方向单独反向检索（`search_papers`，按 date 排序，覆盖到最近一月）。
-- **引用核对与评审**：完整报告核对承重声明，可由主代理完成；使用子代理不自动强制新增两级审核。实质矛盾或明确独立复核要求才另派 reviewer，修正后只复核受影响结论。
+- **verifier → reviewer 串行**：研究员参与后 verifier 强制；reviewer 的 FATAL 必须修复并磁盘复核后才可交付；修复 >3 处时重写整文件为 `-revised.md`。
 - **工具调用统计入 provenance**：Skill/arxiv MCP/alphaxiv/Web/Agent 各类调用次数写入 `<slug>.provenance.md`（管线路径的审计证据）。
 
 ## 可复用资产输出契约（方向扫描/选题调研类必执行）
@@ -147,7 +143,7 @@ Use subagents only when decomposition clearly helps:
 If direct search was chosen:
 - Skip researcher spawning entirely.
 - Search and fetch sources yourself.
-- Search the angles needed to answer the question; stop once relevant evidence is sufficient. No minimum query count or unrelated history/comparison searches.
+- Use multiple search terms/angles before drafting. Minimum: 3 distinct queries for direct-mode research, covering definition/history, mechanism/formula, and current usage/comparison when relevant.
 - Record the exact search terms used in `outputs/.drafts/<slug>-research-direct.md`.
 - Write notes to `outputs/.drafts/<slug>-research-direct.md`.
 - Continue to synthesis.
@@ -193,7 +189,7 @@ If direct search/no researcher subagents was chosen:
 - Copy or rewrite `outputs/.drafts/<slug>-draft.md` to `outputs/.drafts/<slug>-cited.md` with inline citations and a Sources section.
 - Do not spawn the `verifier` subagent for simple direct-search runs.
 
-If researcher subagents were used, the lead checks the synthesized claims and citations. A separate `verifier` is optional when source volume warrants it; if used, run it before a reviewer that depends on its output:
+If researcher subagents were used, run the `verifier` agent after the draft exists. This step is mandatory and must complete before any reviewer runs. Do not run the `verifier` and `reviewer` in the same parallel batch:
 
 `Agent(subagent_type="verifier", prompt="Add inline citations to outputs/.drafts/<slug>-draft.md using the research files outputs/.drafts/<slug>-research-*.md as source material. Verify every URL. ALSO audit the conclusion table against the reusable-assets contract: any candidate rejected merely because 'someone did it before / it is only a recombination' must be flagged as a misbuild; a provisional delta or bounded comparison can develop the idea, without a complete candidate card or family-level novelty. Check concrete operations and conditions before calling a proposal redundant; transferable recipes logged only as blockers must be flagged. For topic scans, check the recipe & necessity comparison covers its eight sub-dimensions and that claimed recipe costs cite actually-reported resources. Write the complete cited brief (with the misbuild audit appended as a final section) to outputs/.drafts/<slug>-cited.md.")`
 
@@ -209,11 +205,11 @@ If direct search/no researcher subagents was chosen:
 - Fix FATAL issues before delivery.
 - Do not spawn the `reviewer` subagent for simple direct-search runs.
 
-A separate `reviewer` is optional for substantial unresolved disagreements or an explicit independent-review requirement, after the cited draft exists; otherwise the lead performs the scoped review:
+If researcher subagents were used, only after `outputs/.drafts/<slug>-cited.md` exists, run the `reviewer` agent against it:
 
 `Agent(subagent_type="reviewer", prompt="Verify outputs/.drafts/<slug>-cited.md. Flag unsupported claims, logical gaps, single-source critical claims, and overstated confidence. This is a verification pass, not a peer review. Write the review to outputs/.drafts/<slug>-verification.md.")`
 
-Fix material errors before claiming the affected conclusion, then check the changed passages only. Do not restart the full review pipeline. Unresolved issues limit the relevant claim, not unrelated implementation work.
+If the reviewer flags FATAL issues, fix them before delivery and run one more review pass. Note MAJOR issues in Open Questions. Accept MINOR issues.
 
 When applying reviewer fixes, do not issue one giant edit with many replacements. Use small localized edits only for 1-3 simple corrections. For section rewrites, table rewrites, or more than 3 substantive fixes, read the cited draft and write a corrected full file to `outputs/.drafts/<slug>-revised.md` instead.
 

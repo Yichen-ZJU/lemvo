@@ -2,7 +2,7 @@
 
 These conventions apply **when doing research work** — deep research, literature reviews, paper reading/writing, replications, experiment loops, or any task using the research skills in `~/.claude/skills/`. For ordinary coding tasks, ignore them.
 
-**调研按规模执行**：系统综述与深调研报告按对应技能完整流程；实验中的配方检索、最近邻补读和定向查证直接读取相关来源，更新已有记录后继续实施，不强制七步管线或子代理链。承重声明仍须原文支持。
+**调研类任务的触发纪律（硬约定）**：深度调研/文献综述/方向扫描/选题论证必须通过 Skill 工具正式加载 `deep-research`（或 `literature-review`）并按其 Step 1-7 管线执行——禁止绕过（不加载 Skill 自行 WebSearch 拼报告 = 违规，报告不予采信）。只有冒烟级小问答可豁免。
 
 **论文检索后端优先级（自动降级，探测结果记 provenance）**：arxiv MCP（`mcp__arxiv__*`，本机 arxiv-mcp-server，主后端、无 key）→ alphaxiv MCP（可见且健康时优先做语义发现；401/403 即降级不重试）→ WebSearch/WebFetch（兜底，降级须明示）。
 
@@ -54,9 +54,9 @@ Never use generic names like `research.md`, `draft.md`, `brief.md`, or `summary.
 
 ## Provenance and verification
 
-- Standalone deep-research and literature-review reports include a provenance sidecar; targeted lookups keep sources in existing project notes without duplicate artifacts.
+- Every deep-research and literature-review output must include a `.provenance.md` sidecar.
 - Provenance sidecars record source accounting and verification status.
-- Check source support while writing; a separate verifier stage is optional, and corrections can be made directly with their scope recorded.
+- Source verification and citation cleanup belong in the `verifier` stage, not in ad hoc edits after delivery.
 - Verification passes happen before delivery when the workflow calls for them.
 - If a workflow uses the words `verified`, `confirmed`, or `checked`, the underlying artifact should record what was actually checked and how.
 - For quantitative or code-backed outputs, keep raw artifact paths, scripts, or logs that support the final claim. Do not rely on polished summaries alone.
@@ -70,22 +70,4 @@ Never use generic names like `research.md`, `draft.md`, `brief.md`, or `summary.
 - Use subagents when the work is meaningfully decomposable; do not spawn them for trivial work.
 - Prefer file-based handoffs over dumping large intermediate results back into parent context.
 - The lead agent is responsible for reconciling task completion. Subagents may not silently skip assigned tasks; skipped or merged tasks must be recorded in the plan artifact.
-- Check critical claims against their evidence. Independent adversarial review is for explicit delivery requirements or substantial unresolved disputes, not every experiment or local change.
-
-## 推进优先，检查按影响范围执行
-
-默认下一步是构建方法、修改实现、运行实验或分析已有结果。检查只用于解决会影响
-这一步的具体疑问；不把“再审计一轮”作为默认下一步，也不为检查建立新的检查流程。
-- 已有适用的代码、来源和评测记录直接复用；只有相关输入、实现或条件改变，或出现
-  新矛盾时，重查受影响部分。不因新会话、换阶段或生成报告而重跑整套验证。
-- 普通开发改动做相关局部检查即可；能由即将运行的实验检验的行为，直接在该实验
-  中观察。全量回归、独立复核、故障注入、恢复演练、灰度及性能测试只在实际改动
-  或明确交付要求涉及这些风险时使用，不自动附着到每一轮科研工作。
-- 需要额外诊断时，用已有工作记录的一句话说明它将改变哪个实现或实验决定；
-  能行动就行动，不新增表格、审批、评分或完整性门槛。无新信息的复查直接省略。
-- 记录实际版本、结果与必要来源；不为普通阅读、写作或分析额外生成哈希、快照和
-  冻结文件。确认性实验的冻结协议、回滚所需的代码保护和运行时作业记录照常保留。
-- 发现问题先处理对应实现、测量或当前主张；相似工作、小样本未确认和单次负结果
-  不否定整个方向。继续建设的方案由任务与证据决定，不强制增量路线或无限修复。
-- 汇报以方法改动、可运行代码、实验结果、获得的认识和下一动作展开；检查数量、
-  文档数量不代表科研成果。检查未完成只限定相关结论，不冻结无关的可执行工作。
+- For critical claims, require at least one adversarial verification pass after synthesis. Fix fatal issues before delivery or surface them explicitly.
