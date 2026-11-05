@@ -1,3 +1,10 @@
+# 2026-11-05 — Research action before repeated process
+
+- Scope validation to changed behavior; reuse applicable evidence. Targeted literature lookups return directly to implementation.
+- Development iterations reuse evaluation contracts; protocol freezing stays specific to confirmatory experiments.
+- Remove automatic verifier/reviewer chains for narrow research and mandatory two-input checks for unrelated changes.
+- No runtime, approval, resource-limit or running-campaign changes.
+
 # Changelog
 
 ## 2026-11-02 — Windows decision worker and SSH handoff

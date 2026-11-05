@@ -29,10 +29,10 @@ Research library with 114 skills, including the research-orchestrator double loo
 ## Dual-engine research norms
 
 1. Broad-scan (discovery phase) → Codex native deep research mode (multi-angle, cross-check, reverse occupy-search).
-2. Deep-drill (verification phase) → deep-research pipeline (load SKILL.md → plan → researcher/verifier/reviewer → per-source citations → provenance). Load-bearing claims MUST go through this pipeline.
+2. Choose investigation depth by the question: targeted recipe/claim lookups use direct source reading and existing notes; comprehensive reports use deep-research. Load-bearing claims need original-source support, not mandatory agent chains.
 3. Full-text caching: load-bearing papers via download_paper full text; never settle for abstract-level.
 4. Version pinning: cite arXiv version numbers; cross-report comparison checks versions first.
-5. Raw evidence on disk: query terms / download lists / recompute scripts / source snapshots all committed with artifacts.
+5. Keep source references and raw results needed to reproduce the actual claim. Reuse existing records; do not create new snapshots or hashes for every lookup.
 6. Failed-run discrimination: when a residual log stops at "waiting for confirmation", check whether a second successful run exists; count the latter and note the former.
 7. Restraint in comparison claims: two lanes may share the same skill backend — do not claim methodology differences from surface execution paths.
 
@@ -40,7 +40,7 @@ Research library with 114 skills, including the research-orchestrator double loo
 
 - Research outputs → `outputs/` (slug-prefixed files, provenance sidecars).
 - Intermediate → `outputs/.drafts/` and `outputs/.notes/`; plans → `outputs/.plans/`.
-- Every deep-research output includes a `.provenance.md` sidecar (tool invocation counts, accepted/rejected sources, verification status).
+- Standalone deep-research reports include a provenance sidecar; targeted experimental lookups keep sources in existing notes, without duplicate artifacts or tool-count accounting.
 - Never generic names (research.md, draft.md). Concurrent runs must not collide.
 
 ## Research discipline (mandatory)
@@ -58,4 +58,22 @@ Research library with 114 skills, including the research-orchestrator double loo
 
 ## Skill loading
 
-Read `~/.codex/skills/<name>/SKILL.md` and follow its workflow (Codex has no dedicated Skill tool; file-based loading is the equivalent). Research-type tasks (deep research / literature review / direction scouting) MUST go through the pipeline — no bypassing with raw web_search answers. Smoke-level factual queries are exempt.
+Read `~/.codex/skills/<name>/SKILL.md` and follow its workflow (Codex has no dedicated Skill tool; file-based loading is the equivalent). Select the skill workflow by scope: comprehensive reports use the full pipeline; targeted research during experiments uses direct source reading and existing notes, then returns to implementation.
+
+## 推进优先，检查按影响范围执行
+
+默认下一步是构建方法、修改实现、运行实验或分析已有结果。检查只用于解决会影响
+这一步的具体疑问；不把“再审计一轮”作为默认下一步，也不为检查建立新的检查流程。
+- 已有适用的代码、来源和评测记录直接复用；只有相关输入、实现或条件改变，或出现
+  新矛盾时，重查受影响部分。不因新会话、换阶段或生成报告而重跑整套验证。
+- 普通开发改动做相关局部检查即可；能由即将运行的实验检验的行为，直接在该实验
+  中观察。全量回归、独立复核、故障注入、恢复演练、灰度及性能测试只在实际改动
+  或明确交付要求涉及这些风险时使用，不自动附着到每一轮科研工作。
+- 需要额外诊断时，用已有工作记录的一句话说明它将改变哪个实现或实验决定；
+  能行动就行动，不新增表格、审批、评分或完整性门槛。无新信息的复查直接省略。
+- 记录实际版本、结果与必要来源；不为普通阅读、写作或分析额外生成哈希、快照和
+  冻结文件。确认性实验的冻结协议、回滚所需的代码保护和运行时作业记录照常保留。
+- 发现问题先处理对应实现、测量或当前主张；相似工作、小样本未确认和单次负结果
+  不否定整个方向。继续建设的方案由任务与证据决定，不强制增量路线或无限修复。
+- 汇报以方法改动、可运行代码、实验结果、获得的认识和下一动作展开；检查数量、
+  文档数量不代表科研成果。检查未完成只限定相关结论，不冻结无关的可执行工作。
