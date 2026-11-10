@@ -113,5 +113,38 @@ class ContextTest(unittest.TestCase):
             self.assertEqual(list(Path(directory).iterdir()), [path])
 
 
+
+    def test_method_notes_are_forwarded_before_candidate_read_only(self):
+        with tempfile.TemporaryDirectory() as directory:
+            d = Path(directory)
+            candidate = d / "candidate.json"
+            first = d / "source.json"
+            second = d / "method.md"
+            candidate.write_text('{"candidate_id":"new-child","concrete_change":"adapt sampler"}', encoding="utf-8")
+            first.write_text('{"operator":"source-update","unknown_source_field":{"units":"seconds"}}', encoding="utf-8")
+            second.write_text("## Original method\nComputes a posterior; routes it to the solver.", encoding="utf-8")
+            before = {p.name: p.read_bytes() for p in [candidate, first, second]}
+            result = subprocess.run([sys.executable, str(SCRIPT), str(candidate),
+                                     "--methods", str(first), "--methods", str(second)],
+                                    capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn('"unknown_source_field"', result.stdout)
+            self.assertIn("Computes a posterior", result.stdout)
+            self.assertLess(result.stdout.index("source-update"), result.stdout.index("new-child"))
+            self.assertEqual(before, {p.name: p.read_bytes() for p in [candidate, first, second]})
+
+    def test_unavailable_optional_method_notes_do_not_block_legacy_candidate(self):
+        with tempfile.TemporaryDirectory() as directory:
+            d = Path(directory)
+            candidate = d / "old.md"
+            candidate.write_text("Existing candidate is still usable", encoding="utf-8")
+            result = subprocess.run([sys.executable, str(SCRIPT), str(candidate),
+                                     "--methods", str(d / "absent.md")],
+                                    capture_output=True, text=True, encoding="utf-8")
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIn("Context unavailable", result.stdout)
+            self.assertIn("Existing candidate is still usable", result.stdout)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

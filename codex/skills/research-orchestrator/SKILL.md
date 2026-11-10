@@ -280,6 +280,13 @@ ACTIVE"不得触发下一轮 continue；支线停止或 pivot 时**累计准备�
 
 ## 近邻存在 ≠ 否决（Neighbors are not a veto）
 
+**生成端消费机制内容**：调用构思技能时，把已有调研中的相关源操作、必要
+条件与代码随问题传入，按 [neighbor-to-method](../shared-references/neighbor-to-method.md)
+把近邻作为父实现/构件，依据本任务条件生成实际适配；不要只传论文标题或
+先生成再送评。后续交接把这些内容与 concrete_change 一起送到实施端。现有
+construction_context.py 的可选 `--methods` 可直接转发选定机制笔记，不另建库。
+使用当前可得资料，不以来源数量或差异声明完整度阻塞构思与授权内开发。
+
 **从论文到方法**：收到论文种子并需要构思时，走 brainstorming 的
 [paper-to-method 入口](../shared-references/paper-to-method.md)，将原方法还原为
 可改的信息/学习路径，再选具体设计动作；用现有候选记录把源机制、父实现、

@@ -10,6 +10,12 @@ dependencies: []
 
 # Creative Thinking for Research
 
+Use [neighbor-to-method construction](../shared-references/neighbor-to-method.md)
+to instantiate a cognitive move from actual source operations and target conditions.
+Let the borrowed mechanism change the proposed implementation, not just its citation
+list. Reuse an existing method as a parent when the first intuition is already known;
+develop a useful adaptation without a novelty verdict or complexity requirement.
+
 For a seed paper or a concrete method bottleneck, use the on-demand
 [paper-to-method design operations](../shared-references/paper-to-method.md) to
 instantiate a useful cognitive move as an actual operator, supervision signal,

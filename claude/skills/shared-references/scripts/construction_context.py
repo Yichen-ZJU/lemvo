@@ -7,6 +7,7 @@ the underlying experiments. No model calls, writes, scoring or status changes.
 """
 import argparse
 import json
+import sys
 from pathlib import Path
 
 
@@ -112,14 +113,21 @@ def render_document(text, label, findings=False):
 
 
 def main(argv=None):
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("candidate", help="Existing candidate JSON or Markdown; no schema migration needed")
     parser.add_argument("--findings", help="Optional existing findings JSON or Markdown")
+    parser.add_argument("--methods", action="append", default=[],
+                        help="Optional existing source-mechanism notes (repeatable); forwarded read-only, not scored")
     args = parser.parse_args(argv)
     print("# Construction handoff\n\nUse the current candidate version and its actual code base. "
           "Source conditions and prior observations inform implementation; predictions are not results. "
           "Missing fields do not create a permission gate.")
-    for path, is_findings in ((args.candidate, False), (args.findings, True)):
+    sources = [(path, False, "Retrieved method notes — source material, not new results")
+               for path in args.methods]
+    sources += [(args.candidate, False, "Candidate"), (args.findings, True, "Findings")]
+    for path, is_findings, label in sources:
         if not path:
             continue
         try:
@@ -129,7 +137,7 @@ def main(argv=None):
                   .format(path, exc))
             continue
         print("\nSource: {}\n".format(path))
-        print(render_document(text, "Findings" if is_findings else "Candidate", findings=is_findings))
+        print(render_document(text, label, findings=is_findings))
     return 0
 
 

@@ -6,6 +6,13 @@ argument-hint: <task-description>
 
 # Experiment Forge
 
+When a candidate borrows a neighboring method, read its actual source operation,
+target-condition adaptation and direct parent comparison from the existing handoff;
+do not rebuild a weaker baseline merely because the proposal has a new title.
+The optional `../shared-references/scripts/construction_context.py --methods <notes>`
+argument can carry selected mechanism notes with the candidate. Reuse or adapt the
+actual component and record the concrete change, without a new literature/review gate.
+
 
 ## 任务包结构
 

@@ -22,7 +22,7 @@
 
 Start from a research direction, an existing paper and implementation, or unfinished experiments. Lemvo chooses a route from your goal and available assets: build a new study from literature and ideas, develop a hypothesis, improve an existing method, or continue saved experiments. Work together at key decisions, or let the resident controller continue within your authorized scope.
 
-Give Lemvo a paper and ask: “Develop implementable research ideas from this work.” It maps the source mechanism, chooses concrete changes to supervision, operators, objectives or information flow, and proposes implementation interfaces and a first comparison. See [Paper to Method](claude/skills/shared-references/paper-to-method.md).
+Give Lemvo a paper and ask: “Develop implementable research ideas from this work.” It reads selected neighboring mechanisms as design inputs, adapts their operations to the target conditions, and proposes implementation interfaces plus a direct-parent comparison. See [Paper to Method](claude/skills/shared-references/paper-to-method.md).
 
 ## Core capabilities
 

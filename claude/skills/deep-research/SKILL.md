@@ -75,6 +75,12 @@ partial output and continue inline rather than repeatedly spawning the same work
 
 ## 定向构思接口（按需，非必执行）
 
+在现有 Reusable Assets 中，把选中近邻写到可复用操作层：读取什么、计算
+什么、谁消费、怎样影响学习/决策、哪些条件已知；附相应方法节/代码。用
+[neighbor-to-method](../shared-references/neighbor-to-method.md) 将这些内容直接
+交给构思端作为设计材料，不只是“占位清单”。这属于原有综合/交接，不新加
+阶段或交付门；既有 Step 1-7、引用核验和多级审核保持原样。
+
 当调研已锁定一个具体瓶颈、需要"哪篇论文的哪个机制适合当前瓶颈"时，按
 `../shared-references/grounded-ideation.md` 的机制检索与候选交接章节走：
 复用本项目已有文献产物做定向阅读，产出候选卡（falsifiable_prediction +

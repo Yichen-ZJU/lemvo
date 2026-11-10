@@ -19,6 +19,12 @@ Derive a short slug from the topic (lowercase, hyphens, no filler words, ≤5 wo
 
 ## Workflow
 
+When the review feeds method generation, carry selected neighbors' actual operations,
+inputs/outputs, necessary conditions and source/code locations in the existing Reusable
+Assets notes. The generator uses [neighbor-to-method](../shared-references/neighbor-to-method.md)
+to adapt those operations, rather than treating the bibliography as a veto list. This
+fits the existing synthesis/handoff, with no additional stage or completeness gate.
+
 1. **Plan** — Outline the scope: key questions, source types to search (papers, web, repos), time period, expected sections, and a small task ledger plus verification log. When the input appears to name a lab, PI, author, institution lab page, or author profile, run the review as a publication-corpus review: find the lab/author identity first, collect the reachable publication list, then map the research trajectory across that corpus. Write the plan to `outputs/.plans/<slug>.md`. Briefly summarize the plan to the user and continue immediately. Do not ask for confirmation or wait for a proceed response unless the user explicitly requested plan review.
    - When updating the plan ledger later, keep edits small. If an edit would require embedding a large markdown block, rewrite the full corrected plan file with Write instead, then continue to final artifact/provenance verification.
 2. **Gather** — Use `researcher` subagents when the sweep is wide enough to benefit from delegated paper triage before synthesis. For narrow topics, search directly. Researcher outputs go to `<slug>-research-*.md`. For publication-corpus reviews, the lead agent owns identity resolution and writes `notes/<slug>-publications.md` with reachable titles, years, venues, URLs/DOIs, and gaps before delegating trajectory synthesis. Prefer lab publication pages, author profiles, arXiv/OpenReview/Semantic Scholar pages, and paper search results that expose stable source URLs. Do not silently skip assigned questions; mark them `done`, `blocked`, or `superseded`.

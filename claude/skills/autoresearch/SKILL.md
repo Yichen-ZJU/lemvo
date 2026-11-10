@@ -6,6 +6,13 @@ argument-hint: <idea>
 
 # Autoresearch
 
+When a candidate borrows a neighboring method, read its actual source operation,
+target-condition adaptation and direct parent comparison from the existing handoff;
+do not rebuild a weaker baseline merely because the proposal has a new title.
+The optional `../shared-references/scripts/construction_context.py --methods <notes>`
+argument can carry selected mechanism notes with the candidate. Reuse or adapt the
+actual component and record the concrete change, without a new literature/review gate.
+
 自主实验循环。单策略表覆盖两种尺度：**参数级微调**（改大改小/换参数）和**架构级创新**（结构性改动）。
 
 分工：本 skill 负责**运行**循环。两种入口：

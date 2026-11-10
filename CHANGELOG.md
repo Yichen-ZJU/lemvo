@@ -1,3 +1,11 @@
+# 2026-11-10 — Neighbor mechanisms in method generation
+
+- Carry neighboring methods' actual operations, inputs/outputs and necessary conditions into generation, then adapt them to target conditions rather than adding citations after drafting.
+- Reuse the existing candidate schema and read-only context helper; optional repeatable --methods forwards source notes before candidates, preserving legacy calls and missing-note fallback. Explicit UTF-8 output supports Windows consumers.
+- Connect literature assets, brainstorming, orchestrator, Forge/Autoresearch, native Arbor skill/freeform prompts and AutoScientists analyst handoff. No new research stage, role, source quota or novelty gate.
+- Relevant context tests pass in all four distributions; a fresh real-model Reframe run consumed method excerpts through the helper and used them in concrete adapted operations. Source-conditioned generation only; no training or end-to-end automatic retrieval claim.
+- Existing research/review step order, runtime, authorization and project state remain intact.
+
 # 2026-11-10 — Paper-seeded method construction
 
 - Extend existing ideation with concrete operator, supervision, objective, representation and information-flow design moves inspired by ResearchStudio.
