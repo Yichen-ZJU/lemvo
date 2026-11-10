@@ -1,3 +1,11 @@
+# 2026-11-10 — Paper-seeded method construction
+
+- Extend existing ideation with concrete operator, supervision, objective, representation and information-flow design moves inspired by ResearchStudio.
+- Turn a seed paper into implementable candidates and first development comparisons; reuse current candidate/experiment interfaces without new gates, quotas or review roles.
+- Route public Claude/Codex and Pro ideation; cover native Arbor skill/freeform prompts and the AutoScientists analyst handoff.
+- Real-model demonstration on Reframe (2611.12886) generated three methods and revised local objective/provenance/accounting issues in the same session. Full source supplied inline after isolated CLI tool-read failures; not an automatic-loading or training-success benchmark.
+- Existing full research/review workflows, runtime state and experiment permissions unchanged.
+
 # 2026-11-05 — Restore research workflows; narrow action-first scope
 
 - Restore deep-research, literature-review and global conventions exactly to the prior revision: full research workflow and multi-level review retained.

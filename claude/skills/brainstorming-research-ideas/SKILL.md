@@ -1,6 +1,6 @@
 ---
 name: brainstorming-research-ideas
-description: Guides structured research ideation, including incremental extensions of existing work, combinations, and new directions. Use when developing a half-formed idea, exploring a problem space, or seeking a better approach to a current bottleneck.
+description: Guides structured research ideation, including incremental extensions of existing work, combinations, and new directions. Use when extending a seed paper into implementable methods, developing a half-formed idea, exploring a problem space, or seeking a better approach to a current bottleneck.
 version: 1.0.0
 author: Orchestra Research
 license: MIT
@@ -9,6 +9,15 @@ dependencies: []
 ---
 
 # Research Idea Brainstorming
+
+## 从一篇论文发散方法
+
+用户给论文/链接说“基于它发散 idea”时，先读
+[paper-to-method](../shared-references/paper-to-method.md)。从原文实际输入、监督、
+核心操作和结果条件出发，用适合的设计动作展开具体新方法，而不是只总结局限、
+改名称或评创新分。提案写清继承、改动、代码接口和首项开发比较；未查清的差异
+标暂定。单独发散请求不新建战役或额外询问运行模式，也不擅自启动训练。
+这是下面通用框架的具体入口，不要求再把所有发散框架跑一遍。
 
 Structured frameworks for discovering the next research idea. This skill provides ten complementary ideation lenses that help researchers move from vague curiosity to concrete, defensible research proposals. Each framework targets a different cognitive mode—use them individually or combine them for comprehensive exploration.
 

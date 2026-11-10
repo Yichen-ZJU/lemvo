@@ -10,6 +10,12 @@ dependencies: []
 
 # Creative Thinking for Research
 
+For a seed paper or a concrete method bottleneck, use the on-demand
+[paper-to-method design operations](../shared-references/paper-to-method.md) to
+instantiate a useful cognitive move as an actual operator, supervision signal,
+objective, representation or information-flow change. One useful move is enough;
+do not run every framework or add a novelty review before handing off the design.
+
 Eight empirically grounded frameworks from cognitive science, applied to computer science and AI research. Unlike ad-hoc brainstorming, each framework here is backed by decades of creativity research — from Koestler's bisociation to Kauffman's adjacent possible. They target distinct cognitive operations: combining, reformulating, analogizing, constraining, inverting, abstracting, exploring boundaries, and holding contradictions.
 
 ## When to Use This Skill

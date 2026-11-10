@@ -280,6 +280,12 @@ ACTIVE"不得触发下一轮 continue；支线停止或 pivot 时**累计准备�
 
 ## 近邻存在 ≠ 否决（Neighbors are not a veto）
 
+**从论文到方法**：收到论文种子并需要构思时，走 brainstorming 的
+[paper-to-method 入口](../shared-references/paper-to-method.md)，将原方法还原为
+可改的信息/学习路径，再选具体设计动作；用现有候选记录把源机制、父实现、
+改动与最直接比较交给执行后端。构思请求不因“尚未成熟”默认送 idea-evaluator。
+单独发散先交付提案；已有执行授权和项目模式时按原模式继续，不另加批准环节。
+
 **构思不是完成事件**：当任务是改进已有方法、父实现与开发评测可跑时，
 候选文字、评审分数或“再诊断一次”的建议不得代替实验批次。unattended
 模式在既有授权内把一个可逆代码改动交给 Autoresearch/现有执行后端，

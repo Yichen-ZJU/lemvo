@@ -14,6 +14,11 @@ license: CC-BY-4.0
 
 # Idea Evaluator
 
+**Generation is a different request.** “Read this paper and develop implementable
+ideas” routes to brainstorming and [paper-to-method](../shared-references/paper-to-method.md),
+not this verdict workflow. Evaluate only when evaluation was actually requested;
+do not insert a reviewer verdict as an automatic prerequisite to method construction.
+
 ## Overview
 
 This skill evaluates a preliminary research idea from the combined
