@@ -97,6 +97,16 @@ Session files: `autoresearch.md`, `autoresearch.sh`, `autoresearch.jsonl`, `resu
 
 ### 4.2 选步（策略表，证据驱动）
 
+**新机制构思的明确路由**：用户要求“想想有什么值得做的/提出下一种方法”，或
+选步进入 escalate / change-strategy 且需要新的方法机制时，读取
+[brainstorming-research-ideas](../brainstorming-research-ideas/SKILL.md) 与
+[neighbor-to-method](../shared-references/neighbor-to-method.md)。把当前目标、实际
+父实现、最近结果及已有近邻操作一起传入，在当前会话完成所需构思，选定具体
+改动后回到 4.3 Modify → Run；不插入 idea-evaluator 或新的批准环节。已有明确
+改法时直接实施。scale=params 仍尊重用户所选范围：范围内可构思参数/配方，
+需要结构性改动则按现有规则交回外循环处理范围调整。来源笔记按需复用，
+构思不要求重开综述、证明全场景效果或完成一套新表单。
+
 | 选步 | 触发 | 动作 |
 |---|---|---|
 | 跟进 follow | 上轮改进 | 同杠杆同方向再进一步 |

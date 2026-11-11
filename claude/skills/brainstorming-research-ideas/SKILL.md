@@ -1,6 +1,6 @@
 ---
 name: brainstorming-research-ideas
-description: Guides structured research ideation, including incremental extensions of existing work, combinations, and new directions. Use when extending a seed paper into implementable methods, developing a half-formed idea, exploring a problem space, or seeking a better approach to a current bottleneck.
+description: Guides structured research ideation, including incremental extensions of existing work, combinations, and new directions. Use when the user asks what research is worth doing or requests new method ideas, extending a seed paper into implementable methods, developing a half-formed idea, exploring a problem space, or seeking a better approach to a current bottleneck.
 version: 1.0.0
 author: Orchestra Research
 license: MIT
