@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 单轮适配器 v4.15：具体任务/结果交接、带状态的安全会话轮换；保留等待、进展与指令契约
+# 单轮适配器 v4.16：具体任务/结果交接、带状态的安全会话轮换；保留等待、进展与指令契约
 #  v4.8 变更（对 v4.7，均带隔离回归）：
 #  费用政策（用户决定 2026-10-14）：USD 费用默认只统计、不停止、不缩实验、
 #    不否定方向；金额停止门仅当 budget.cap_authorized: yes（真实用户明确授权、
@@ -1427,15 +1427,32 @@ PYEF
 
 # ── 5) 真续接调用（双引擎；输出入 turn 目录；PID+starttime 身份发布）──
 run_engine() {
-  local engpid engstart watch_rc
+  local engpid engstart watch_rc heartbeat_pid=""
+  local -a event_settings=()
   SID=""
   python3 "$RUNTIME_SUPPORT" watchdog-config || { emit_reason "CONFIG_INVALID"; exit 64; }
+  # Project-local, immutable hook helper. This never changes permissions or calls a model.
+  # Failed/disabled hook configuration is visible and does not prevent useful research.
+  if [ "$ENGINE" = "claude" ] && [ -f "$(dirname "$SELF")/configure-event-runtime.py" ]; then
+    python3 "$(dirname "$SELF")/configure-event-runtime.py" install --root "$PROJ_DIR" \
+      --engine claude --templates "$(dirname "$SELF")" > "$TD/event-runtime-install.json" \
+      || say "Event wait hook could not be configured; see project installation status."
+    if python3 - "$TD/event-runtime-install.json" <<'PYACTIVE'
+import json,sys
+try: active=json.load(open(sys.argv[1])).get('active') is True
+except (OSError,ValueError,AttributeError): active=False
+sys.exit(0 if active else 1)
+PYACTIVE
+    then
+      event_settings=(--settings "$PROJ_DIR/.claude/settings.local.json")
+    fi
+  fi
   if [ "$ENGINE" = "claude" ]; then
     if [ "$SESSION_ACTION" = resume ] && [ -s "$SID_FILE" ]; then
       SID="$(cat "$SID_FILE")"
-      "$CLAUDE_BIN" -p "$(cat "$MSG_SOURCE")" --resume "$SID" --output-format stream-json --verbose --include-partial-messages $CLAUDE_PERMS > "$TD/engine-stdout.jsonl" 2> "$TD/engine-stderr.log" &
+      CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 "$CLAUDE_BIN" "${event_settings[@]}" -p "$(cat "$MSG_SOURCE")" --resume "$SID" --output-format stream-json --verbose --include-partial-messages $CLAUDE_PERMS > "$TD/engine-stdout.jsonl" 2> "$TD/engine-stderr.log" &
     else
-      "$CLAUDE_BIN" -p "$(cat "$MSG_SOURCE")" --output-format stream-json --verbose --include-partial-messages $CLAUDE_PERMS > "$TD/engine-stdout.jsonl" 2> "$TD/engine-stderr.log" &
+      CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=0 "$CLAUDE_BIN" "${event_settings[@]}" -p "$(cat "$MSG_SOURCE")" --output-format stream-json --verbose --include-partial-messages $CLAUDE_PERMS > "$TD/engine-stdout.jsonl" 2> "$TD/engine-stderr.log" &
     fi
   else
     if [ "$SESSION_ACTION" = resume ] && [ -s "$SID_FILE" ]; then
@@ -1448,6 +1465,13 @@ run_engine() {
   engpid=$!
   engstart=$(pid_start "$engpid")
   echo "$engpid ${engstart:-unknown}" > .autoloop-engine.pid
+  # A real hook can block for hours while training. Surface only that verified CPU wait
+  # to the existing CLI watchdog; it is not a scientific-progress claim or model call.
+  if [ "$ENGINE" = "claude" ] && [ -f "$(dirname "$SELF")/runtime-heartbeat.py" ]; then
+    python3 "$(dirname "$SELF")/runtime-heartbeat.py" --root "$PROJ_DIR" --parent "$engpid" \
+      >> "$TD/engine-stderr.log" 2>&1 &
+    heartbeat_pid=$!
+  fi
   python3 - "$ENGINE_JSON" "$engpid" "${engstart:-unknown}" <<'PYEP'
 import json, sys
 d = json.load(open(sys.argv[1]))
@@ -1461,6 +1485,10 @@ PYEP
     printf 'RUNNING|WATCHDOG_ERROR|turn_id=%s\n' "$TURN_ID" > .lemvo-status
   fi
   wait "$engpid"; rc=$?
+  if [ -n "$heartbeat_pid" ]; then
+    kill "$heartbeat_pid" 2>/dev/null || true
+    wait "$heartbeat_pid" 2>/dev/null || true
+  fi
   export LEMVO_TURN_INTERRUPTED=no
   if [ "$watch_rc" -eq 124 ] || [ -f "$TD/timeout.json" ]; then
     rc=124; export LEMVO_TURN_INTERRUPTED=yes

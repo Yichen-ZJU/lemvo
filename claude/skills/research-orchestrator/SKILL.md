@@ -469,3 +469,10 @@ research-state.yaml 的 supported / refuted / inconclusive 字段承担全部
 ## Windows workstation and SSH execution
 
 When research decisions run on Windows and experiments run on SSH hosts, use the [desktop dispatch reference](../remote-compute-ssh/references/windows-desktop.md). The initial desktop bridge uses Codex on both sides; it is optional alongside the existing Claude and Codex server workflows. It provides unattended local sessions and safe Windows/server handoff while preserving the remote project state and existing Lemvo runtime. Linux runtime helpers execute on the selected server.
+
+
+## 事件等待与自动续接
+
+外部等待与主会话退出由普通程序处理，参见[事件等待与退出续接](references/event-driven-runtime.md)。
+复用当前研究 owner、结果和活作业；不靠模型反复 sleep/tail 保活，不新增科研审核门。
+Claude 的项目 hook 与 Codex 的控制器契约分开，不把配置写入当成真实启用。

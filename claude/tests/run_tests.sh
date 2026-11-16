@@ -15,6 +15,11 @@ python3 tests/runtime_contract_test.py  # wait/reply, construction accounting, s
 python3 tests/runtime_workunit_test.py  # actual task/context helper, no model
 python3 tests/runtime_dispatch_test.py  # both CLI dispatch and safe fresh handoffs
 python3 tests/runtime_handoff_order_test.py  # current instruction/order/purge regression
+python3 tests/runtime_job_events_test.py
+python3 tests/event_runtime_install_test.py
+python3 tests/runtime_event_adapter_test.py
+python3 tests/execution_owner_lock_test.py
+python3 tests/native_event_runtime_test.py
 if [ -f tests/pro_context_test.py ]; then python3 tests/pro_context_test.py; fi
 if [ -f tests/team_classification_test.py ]; then
   python3 tests/team_classification_test.py  # optional installed backend consumer

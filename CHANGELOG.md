@@ -1,5 +1,14 @@
 # 2026-11-10 — Neighbor mechanisms in method generation
 
+## 2026-11-17 — Event-driven experiment waiting and CLI continuity
+
+- Deliver each completed or failed experiment branch independently while preserving other live jobs; persist and deduplicate execution receipts across restarts.
+- Keep recognized Claude producer waits in ordinary CPU code, with project-local hooks and verified wait heartbeats instead of repeated model polling. Existing permissions and unrelated hooks are preserved.
+- Add an optional native CLI lifecycle owner with same-session result delivery, exact process adoption and a shared lock that prevents parallel native/Lemvo dispatchers.
+- Preserve pending delivery on missing/failed CLI results and ignore incomplete or explicitly nonterminal JSON snapshots. No new scientific acceptance criteria, GPU limits or default cost caps.
+- Include actual adapter, process-lock, partial-result and restart regressions. Runtime configuration and real model observations are reported separately.
+
+
 ## 2026-11-16 — Work-unit dispatch and context handoffs
 
 - Dispatch concrete tasks and retain structured or backward-compatible work results; no new scientific approval gate.

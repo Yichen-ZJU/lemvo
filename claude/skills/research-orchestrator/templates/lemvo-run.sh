@@ -39,8 +39,10 @@ HERE="$(cd "$(dirname "$0")" && pwd)"
 SELF="$HERE/$(basename -- "$0")"
 RUNTIME_SUPPORT="$HERE/runtime-support.py"
 RUNTIME_CONTRACT="$HERE/runtime-contract.py"
+JOB_EVENTS="$HERE/job-events.py"
 [ -f "$RUNTIME_SUPPORT" ] || { echo "Missing runtime-support.py: install the complete research-orchestrator skill."; exit 64; }
 [ -f "$RUNTIME_CONTRACT" ] || { echo "Missing runtime-contract.py: install the complete runtime bundle."; exit 64; }
+[ -f "$JOB_EVENTS" ] || { echo "Missing job-events.py: install the complete runtime bundle."; exit 64; }
 AUTOLOOP="${AUTOLOOP_SCRIPT:-$HERE/autoloop-reference.sh}"
 MODE_F=.lemvo-mode; ENGINE_F=.lemvo-engine; STATUS_F=.lemvo-status
 LOCKD=.lemvo-owner.lock; QUEUE=.lemvo-steer-queue; ARCHIVE=.lemvo-steer-archive
@@ -105,8 +107,37 @@ owner_alive() {  # 0=存活 1=已死/无锁（可接管） 2=初始化中/身份
   if [ -n "$st" ] && [ "$st" != "$(pid_start "$pid")" ]; then return 1; fi
   return 0
 }
+execution_lease_release() {
+  # Signal only this controller's verified CPU lease, never a model/job process.
+  if pid_live_identity "${EXEC_LEASE_PID:-}" "${EXEC_LEASE_START:-}"; then
+    kill "$EXEC_LEASE_PID" 2>/dev/null || true
+    wait "$EXEC_LEASE_PID" 2>/dev/null || true
+  fi
+  [ -n "${EXEC_LEASE_READY:-}" ] && rm -f "$EXEC_LEASE_READY"
+  EXEC_LEASE_PID=""; EXEC_LEASE_START=""; EXEC_LEASE_READY=""
+}
+execution_lease_take() {
+  local token i
+  # No shared lock FD is ever opened in Bash: even ordinary sleep/Python children
+  # must not keep a killed controller's dispatch lease alive.
+  mkdir -p .runtime-events || return 1
+  token="$$-$(date +%s%N)"
+  EXEC_LEASE_READY=".runtime-events/execution-lease-$token.json"
+  python3 "$RUNTIME_SUPPORT" execution-lease "$$" "$(pid_start $$)" "$EXEC_LEASE_READY" "$token" >/dev/null 2>&1 &
+  EXEC_LEASE_PID=$!; EXEC_LEASE_START="$(pid_start "$EXEC_LEASE_PID")"
+  for ((i=0; i<250; i++)); do
+    [ -f "$EXEC_LEASE_READY" ] && break
+    kill -0 "$EXEC_LEASE_PID" 2>/dev/null || break
+    sleep .02
+  done
+  if grep -q '"state": "acquired"' "$EXEC_LEASE_READY" 2>/dev/null; then return 0; fi
+  execution_lease_release
+  say "项目已有科研执行 owner（native 或 Lemvo controller）或 lease 未启动——不并行派发"
+  return 1
+}
 owner_take() {
   local st td
+  execution_lease_take || return 1
   owner_alive; st=$?
   if [ "$st" -eq 0 ]; then return 1; fi
   if [ "$st" -eq 2 ]; then
@@ -130,6 +161,7 @@ owner_take() {
 }
 owner_release() {  # 只清自己名下的锁（核对身份，防旧进程清新 owner 的锁）
   [ "$(cat "$LOCKD/pid" 2>/dev/null || echo)" = "$$" ] && rm -rf "$LOCKD"
+  execution_lease_release
 }
 owner_pid() { [ -d "$LOCKD" ] && cat "$LOCKD/pid" 2>/dev/null || echo 0; }
 
@@ -229,103 +261,8 @@ case "$CMD" in
 esac
 
 # ── C4：作业终态判定（六态；形状错=CORRUPT；result JSON 严格判定）──
-jobs_reconcile_once() {  # 输出: DONE(全成功) | ENDED(有非成功终态) | TIMEOUT | PENDING <names> | CORRUPT
-  python3 - "$JOBS" <<'PYJ'
-import json, os, sys, time
-p = sys.argv[1]
-if not os.path.exists(p):
-    print("DONE"); sys.exit(0)
-try:
-    raw = open(p).read()
-    jobs = json.loads(raw) if raw.strip() else []
-except ValueError:
-    print("CORRUPT"); sys.exit(0)
-if not isinstance(jobs, list):
-    print("CORRUPT"); sys.exit(0)          # 合法 JSON 但根形状错 = CORRUPT（C4）
-if not jobs:
-    print("DONE"); sys.exit(0)
-for j in jobs:
-    if not isinstance(j, dict):
-        print("CORRUPT"); sys.exit(0)      # 元素形状错 = CORRUPT
-now = time.time()
-def alive(pid, expected=None):
-    try:
-        pid = int(pid)
-        if pid <= 0: return False
-        with open('/proc/%d/stat' % pid) as f: fields=f.read().rsplit(')',1)[1].split()
-        return fields[0] != 'Z' and (not expected or str(expected)==fields[19])
-    except (OSError, ValueError, IndexError): return False
-states = []
-for j in jobs:
-    rid = j.get("run_id")
-    ext = bool(j.get("external_coordinator"))
-    df = j.get("done_file") or j.get("wait_file")
-    d = {"run_id": rid, "pid": j.get("pid"), "done_file": df, "external": ext}
-    st = None
-    if df and os.path.exists(df) and os.path.getsize(df) > 0:
-        raw_txt = open(df, encoding="utf-8", errors="replace").read(262144)
-        try:
-            rj = json.loads(raw_txt)
-        except Exception:
-            rj = None
-        if isinstance(rj, dict):           # result JSON：严格按 run_id/status/exit_code
-            d["exit_code"] = rj.get("exit_code")
-            if rid and rj.get("run_id") and str(rj.get("run_id")) != str(rid):
-                st = "stale"               # 旧 run_id 的残留结果 ≠ 本次成功
-            else:
-                s = str(rj.get("status", "")).lower()
-                ec = rj.get("exit_code")
-                if s in ("succeeded", "success", "ok", "complete", "completed") and (ec is None or ec == 0):
-                    st = "succeeded"
-                elif s in ("failed", "error", "oom", "crashed") or (isinstance(ec, int) and ec != 0):
-                    st = "failed"
-                else:
-                    st = "unknown"         # 非空但不声明成功 ≠ 成功（C4）
-            if isinstance(rj.get("metrics"), dict):
-                d["metrics"] = rj["metrics"]        # runner 回执：指标/计时随结果保留
-            d["result"] = dict((k, rj.get(k)) for k in ("run_id", "status", "exit_code") if rj.get(k) is not None)
-        elif raw_txt.lstrip()[:1] in ("{", "["):
-            # R2：预期 JSON 但截断/损坏 ≠ 旧式哨兵。生产者核验存活 → 继续等待；
-            # 已结束/无法核验 → 非成功终态（不提前唤醒下游分析）
-            if j.get("pid") and not ext:
-                if alive(j["pid"], j.get("pid_start")):
-                    st = "running"
-                else:
-                    st = "failed"; d["result"] = {"corrupt_result": df}
-            else:
-                st = "unknown"; d["result"] = {"corrupt_result": df}
-        else:                              # 旧式哨兵（非 JSON 文本）：显式兼容视为完成
-            st = "succeeded"; d["result"] = {"sentinel": "non-json"}
-    if st is None:
-        if j.get("pid") and not ext:
-            if alive(j["pid"], j.get("pid_start")):
-                st = "running"
-            else:
-                st = "ended"               # 进程结束 ≠ 成功（C4）
-        elif ext:
-            st = "unknown"                 # 外部 coordinator：顶层只持接管身份，无 done_file 不可观测
-        else:
-            st = "running"
-    started = j.get("started_epoch")
-    if st == "running" and started and j.get("timeout_min"):
-        if (now - float(started)) > float(j["timeout_min"]) * 60:
-            st = "timed_out"               # 超时保留身份（C4）
-    if st == "running" and (not j.get("pid") or not j.get("pid_start")) and started and not j.get("timeout_min"):
-        if now - float(started) >= float(os.environ.get("LEMVO_UNKNOWN_JOB_SEC", "900")):
-            st = "unknown"
-            d["result"] = {"reason":"no_observable_producer_or_result", "done_file":df}
-    states.append({"name": j.get("name", "?"), "status": st, **d})
-import json as J
-open(".lemvo-jobstates.json", "w").write(J.dumps(states))
-if any(s["status"] == "running" for s in states):
-    print("PENDING " + ",".join(s["name"] for s in states if s["status"] == "running"))
-elif any(s["status"] == "timed_out" for s in states):
-    print("TIMEOUT")
-elif any(s["status"] in ("ended", "failed", "stale", "unknown") for s in states):
-    print("ENDED")
-else:
-    print("DONE")
-PYJ
+jobs_reconcile_once() {  # EVENTS: unconsumed branch terminal, even with live siblings.
+  python3 "$JOB_EVENTS" reconcile "$JOBS" .lemvo-jobstates.json "$RECEIPTS"
 }
 stamp_jobs_started() {
   python3 - "$JOBS" <<'PYJ2'
@@ -340,31 +277,8 @@ try:
 except Exception: pass
 PYJ2
 }
-write_receipts() {  # $1=trigger: done|timeout|ended|corrupt（回执含 run_id/exit_code/host/metrics）
-  mkdir -p "$RECEIPTS"
-  python3 - "$RECEIPTS" "$1" <<'PYR'
-import json, os, socket, sys, time
-rdir, trigger = sys.argv[1], sys.argv[2]
-try:
-    states = json.load(open(".lemvo-jobstates.json"))   # 项目内，防跨项目串线
-except Exception:
-    states = []
-ts = time.strftime("%Y%m%d-%H%M%S")
-hist = open(os.environ.get("JOBS_HIST", ".lemvo-jobs-history.jsonl"), "a")
-for s in states:
-    rid = "%s-%s-%s-%d.json" % (ts, trigger, str(s.get("name", "?")).replace("/", "_"), os.getpid())
-    rec = {"schema_version": 2, "schema": "lemvo-job-receipt", "name": s.get("name"),
-           "run_id": s.get("run_id"), "trigger": trigger, "status": s.get("status"),
-           "exit_code": s.get("exit_code"), "done_file": s.get("done_file"),
-           "pid": s.get("pid"), "external": s.get("external"),
-           "host": socket.gethostname(), "metrics": s.get("metrics"),
-           "result": s.get("result"), "ended_epoch": time.time(), "consumed": False}
-    open(os.path.join(rdir, rid), "w").write(json.dumps(rec, indent=1))
-    hist.write(json.dumps({"ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                           "event": "terminal", "name": s.get("name"), "status": s.get("status"),
-                           "run_id": s.get("run_id"), "trigger": trigger}) + "\n")
-hist.close()
-PYR
+write_receipts() {  # Repeated all-terminal reconciliation must not duplicate events.
+  python3 "$JOB_EVENTS" publish .lemvo-jobstates.json "$RECEIPTS"
 }
 consume_receipts_snapshot() {  # 未消费回执 → 合并消息路径；只取前 20 且只确认这 20
   local f out
@@ -413,12 +327,16 @@ mark_receipts_consumed() {  # 只确认 $1 清单内的（本批成功后才确�
   while IFS= read -r r; do
     [ -f "$r" ] || continue
     python3 - "$r" <<'PYM'
-import json, sys
+import json, os, sys, tempfile
 p = sys.argv[1]
 try:
     d = json.load(open(p))
     d["consumed"] = True
-    json.dump(d, open(p, "w"), indent=1)
+    fd, temporary = tempfile.mkstemp(prefix=".consumed-", dir=os.path.dirname(p) or ".")
+    with os.fdopen(fd, "w") as stream:
+        json.dump(d, stream, indent=1)
+        stream.flush(); os.fsync(stream.fileno())
+    os.replace(temporary, p)
 except Exception: pass
 PYM
   done < "$listf"
@@ -442,6 +360,7 @@ reconcile_gate() {
   stamp_jobs_started
   ST=$(jobs_reconcile_once) || ST=CORRUPT
   case "$ST" in
+    EVENTS) export LEMVO_RESOURCE_WAKE=job-terminal;;  # Preserve mixed live registrations.
     PENDING*) say "有作业在跑（${ST#PENDING }）——本轮不推进，等待完成"; return 1;;
     TIMEOUT) write_receipts timeout; mv "$JOBS" "$JOBS.pending-receipt-$(date +%s)" 2>/dev/null;;
     ENDED)   write_receipts ended;   mv "$JOBS" "$JOBS.pending-receipt-$(date +%s)" 2>/dev/null;;
@@ -786,6 +705,9 @@ while :; do
   stamp_jobs_started
   ST=$(jobs_reconcile_once) || ST=CORRUPT
   case "$ST" in
+    EVENTS)
+      export LEMVO_RESOURCE_WAKE=job-terminal
+      log "A job terminal event is ready; preserve live sibling registrations and deliver once";;
     PENDING*)
       # C2：等待作业期间同样读取模式请求（切 guided 则转等人态）
       if [ "$(mode_now)" = "guided" ]; then set_status "WAITING_USER|jobs-running"; else set_status "WAITING_JOB|${ST#PENDING }"; fi

@@ -67,6 +67,21 @@ def prompt(source, target):
     mode = Path('.lemvo-mode').read_text().strip() if Path('.lemvo-mode').exists() else 'unspecified'
     delegation = Path('.lemvo-delegation').read_text().strip() if Path('.lemvo-delegation').exists() else 'auto'
     parts = ['Runtime context: mode=%s; delegation=%s.' % (mode, delegation)]
+    # Give the worker an executable waiting exit, not only a warning about polling.
+    parts.append('Program-managed waiting: if only external work remains, register its exact PID/start, '
+                 'run_id and result/failed paths in .lemvo-jobs.json, preserve live entries and return '
+                 'waiting_jobs. The controller waits without model calls and resumes on a real event. '
+                 'Keep doing independent useful research when available; waiting is not a scientific rejection.')
+    wait_tool = Path(__file__).with_name('event-wait.py')
+    if wait_tool.is_file():
+        import shlex
+        prefix = shlex.quote(sys.executable) + ' ' + shlex.quote(str(wait_tool))
+        wait_target = ' --root ' + shlex.quote(str(Path.cwd()))
+        parts.append('Claude internal/subagent wait tools (ordinary CPU, no model polling): '
+                     + prefix + ' register' + wait_target + ' --pid PID --start START --job-id ID --done RESULT_JSON; '
+                     + prefix + ' wait' + wait_target + ' --job-id ID. Use actual producer identities and original '
+                     'paths; these tools do not start training or allocate GPUs. Codex uses the job/controller '
+                     'handoff above, not Claude native hooks.')
     contract = Path(__file__).with_name('runtime-contract.py')
     if contract.is_file():
         parts.append(subprocess.check_output([sys.executable, str(contract), 'context']).decode('utf-8'))
@@ -190,6 +205,54 @@ def process_identity(pid):
         return None if fields[0] == 'Z' else fields[19]
     except (OSError, ValueError, TypeError, IndexError):
         return None
+
+
+def execution_lease(owner_pid, owner_start, ready_path, token):
+    """Hold the shared dispatcher lock outside Bash's inheritable descriptor table.
+
+    Only this CPU process has the lock descriptor. It releases automatically when
+    the exact controller dies, even if an ordinary sleep/adapter child survives.
+    """
+    import fcntl
+    owner_pid = int(owner_pid)
+    ready_path = Path(ready_path)
+    runtime = Path('.runtime-events')
+    runtime.mkdir(exist_ok=True)
+    lease_path = runtime / 'execution-lease.json'
+    def ready(state, **details):
+        atomic(ready_path, dict(state=state, token=token, owner_pid=owner_pid,
+                               owner_start=owner_start, lease_pid=os.getpid(), **details))
+    if process_identity(owner_pid) != owner_start:
+        ready('rejected', reason='controller-exited-before-lock')
+        return 1
+    with (runtime / 'execution-owner.lock').open('a+') as lock:
+        deadline = time.monotonic() + 2
+        while True:
+            try:
+                fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                break
+            except BlockingIOError:
+                previous = load(lease_path, {})
+                # A just-killed Bash may leave its lease alive for one CPU tick.
+                # Wait only for that verified dead-controller lease, never for a
+                # live controller/native owner and never by invoking a model.
+                retiring = (isinstance(previous, dict) and
+                    process_identity(previous.get('lease_pid')) == previous.get('lease_start') and
+                    process_identity(previous.get('owner_pid')) != previous.get('owner_start'))
+                if not retiring or time.monotonic() >= deadline:
+                    ready('rejected', reason='execution-owner-active')
+                    return 1
+                time.sleep(.02)
+        if process_identity(owner_pid) != owner_start:
+            ready('rejected', reason='controller-exited-during-lock')
+            return 1
+        atomic(lease_path, dict(schema='lemvo-execution-lease-v1', owner_pid=owner_pid,
+                               owner_start=owner_start, lease_pid=os.getpid(),
+                               lease_start=process_identity(os.getpid()), token=token))
+        ready('acquired')
+        while process_identity(owner_pid) == owner_start:
+            time.sleep(.02)
+    return 0
 
 
 def progress_snapshot(target):
@@ -541,7 +604,8 @@ def doctor(controller):
     current = Path(controller).resolve()
     report['invoked_controller'] = str(current)
     report['sha256'] = hashlib.sha256(current.read_bytes()).hexdigest()
-    bundle=('lemvo-run.sh','autoloop-reference.sh','runtime-support.py','runtime-contract.py','work-unit.py')
+    bundle=('lemvo-run.sh','autoloop-reference.sh','runtime-support.py','runtime-contract.py','work-unit.py',
+            'job-events.py','configure-event-runtime.py','event-wait.py','runtime-heartbeat.py','native-event-owner.py')
     report['bundle']={name:hashlib.sha256((current.parent/name).read_bytes()).hexdigest()
         if (current.parent/name).is_file() else None for name in bundle}
     report['complete_bundle']=all(report['bundle'].values())
@@ -718,4 +782,5 @@ if __name__ == '__main__':
     elif cmd == 'watchdog-config': watchdog_config()
     elif cmd == 'watch-turn': raise SystemExit(watch_turn(*sys.argv[2:6]))
     elif cmd == 'renew-turn': renew_turn(sys.argv[2])
+    elif cmd == 'execution-lease': raise SystemExit(execution_lease(*sys.argv[2:6]))
     else: raise SystemExit(64)
