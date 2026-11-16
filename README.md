@@ -24,6 +24,13 @@ Start from a research direction, an existing paper and implementation, or unfini
 
 Give Lemvo a paper and ask: “Develop implementable research ideas from this work.” It reads selected neighboring mechanisms as design inputs, adapts their operations to the target conditions, and proposes implementation interfaces plus a direct-parent comparison. See [Paper to Method](claude/skills/shared-references/paper-to-method.md).
 
+
+## Concrete tasks, compact handoffs
+
+The runtime dispatches a concrete research task and carries its useful results into the next one. Local debugging can keep its session; stage or method-branch handoffs can start a fresh session from saved project state, relevant findings, current guidance and artifact paths. Existing authorization, cumulative records and running experiments remain attached to the same project. Old projects can continue without filling a new form, and no additional idea-review gate is introduced.
+
+Full logs and source material stay on disk for targeted reading. This controls repeated context rather than reducing the experiments needed by the research. See [work units and handoffs](claude/skills/research-orchestrator/references/work-units.md). The implementation passed isolated runtime regressions and a real Claude CPU handoff test; real Codex tool execution remains environment-blocked; no fixed token-saving percentage is claimed.
+
 ## Core capabilities
 
 | Capability | How it advances research | Entry points |
@@ -245,7 +252,7 @@ bash "$RUN" switch "$PWD" unattended
 bash "$RUN" steer "$PWD" /path/to/guidance.md
 ```
 
-The controller reads the project's mode and resumes the engine. It observes registered background experiments through ordinary code, **without additional model calls while waiting**. When a job ends, its result receipt goes to the engine for analysis. State is stored in the project folder, and `status` reports the current wait or pause reason.
+The controller reads the project's mode and dispatches the current task, either continuing its session or handing saved state to a fresh session. It observes registered background experiments through ordinary code, **without additional model calls while waiting**. When a job ends, its result receipt goes to the engine for analysis. State is stored in the project folder, and `status` reports the current wait or pause reason.
 
 GPU hours and model costs are tracked by default. Explicitly authorized caps, preparation-stall decisions, and configured runner turn limits apply when set. A pause preserves existing progress for continuation.
 

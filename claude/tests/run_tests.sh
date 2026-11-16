@@ -12,6 +12,10 @@ python3 tests/runtime_liveness_test.py  # controller/adapter lifecycle, no model
 python3 tests/runtime_scalability_test.py  # controller/adapter lifecycle, no model or GPU
 python3 tests/runtime_inflight_test.py  # controller/adapter lifecycle, no model or GPU
 python3 tests/runtime_contract_test.py  # wait/reply, construction accounting, scoped instructions
+python3 tests/runtime_workunit_test.py  # actual task/context helper, no model
+python3 tests/runtime_dispatch_test.py  # both CLI dispatch and safe fresh handoffs
+python3 tests/runtime_handoff_order_test.py  # current instruction/order/purge regression
+if [ -f tests/pro_context_test.py ]; then python3 tests/pro_context_test.py; fi
 if [ -f tests/team_classification_test.py ]; then
   python3 tests/team_classification_test.py  # optional installed backend consumer
 fi

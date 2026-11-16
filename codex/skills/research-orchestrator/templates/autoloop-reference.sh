@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 单轮适配器 v4.14：等待/唤醒闭环、统一建设进展与指令版本；失败轮不记科研停滞
+# 单轮适配器 v4.15：具体任务/结果交接、带状态的安全会话轮换；保留等待、进展与指令契约
 #  v4.8 变更（对 v4.7，均带隔离回归）：
 #  费用政策（用户决定 2026-10-14）：USD 费用默认只统计、不停止、不缩实验、
 #    不否定方向；金额停止门仅当 budget.cap_authorized: yes（真实用户明确授权、
@@ -70,6 +70,8 @@ set -uo pipefail
 HELPER_VERSION="4.14"
 RUNTIME_SUPPORT="$(cd "$(dirname "$0")" && pwd)/runtime-support.py"
 RUNTIME_CONTRACT="$(cd "$(dirname "$0")" && pwd)/runtime-contract.py"
+WORK_UNIT="$(cd "$(dirname "$0")" && pwd)/work-unit.py"
+SELF="$(cd "$(dirname "$0")" && pwd)/$(basename -- "$0")"
 [ -f "$RUNTIME_SUPPORT" ] || { echo "Missing runtime-support.py: install the complete research-orchestrator skill."; exit 64; }
 [ -f "$RUNTIME_CONTRACT" ] || { echo "Missing runtime-contract.py: install the complete runtime bundle."; exit 64; }
 
@@ -966,7 +968,13 @@ if [ -n "$RECOVER_TD" ]; then
     say "Old session epoch: keeping evidence without adopting $TD"
     emit_reason "STALE_SESSION_EPOCH"; exit 9
   fi
-  if [ -f "$TD/result.json" ]; then echo "already-settled"; exit 0; fi
+  if [ -f "$TD/result.json" ]; then
+    if [ -f "$WORK_UNIT" ]; then
+      python3 "$WORK_UNIT" settle "$TD" --rc 0 --session-file "$SID_FILE" >/dev/null \
+        || say "Existing work result remains recoverable from saved evidence."
+    fi
+    echo "already-settled"; exit 0
+  fi
   if [ -f "$TD/timeout.json" ]; then
     say "Timed-out orphan is not a successful research turn; preserve guidance and evidence."
     emit_reason "TURN_TIMEOUT"; exit 124
@@ -1086,6 +1094,10 @@ json.dump(obj, open(tmp, "w"), indent=1)
 os.replace(tmp, p)
 PYRW
   python3 "$RUNTIME_CONTRACT" receipt "$TD" || exit 4
+  if [ -f "$WORK_UNIT" ]; then
+    python3 "$WORK_UNIT" settle "$TD" --rc 0 --session-file "$SID_FILE" \
+      || say "Recovered work handoff can be reconstructed from the saved result."
+  fi
   [ -f "$TD/engine.json" ] && python3 -c 'import json,sys
 p=sys.argv[1]+"/engine.json"
 try:
@@ -1163,7 +1175,7 @@ fi
 if [ "$WAITING" = "yes" ] && [ -z "${LEMVO_RESOURCE_WAKE:-}" ]; then
   say "WAITING_RESOURCE——减频等待"
   if [ "$RC_MODE" = "structured" ]; then emit_reason "WAITING_RESOURCE"; exit 7; fi
-  sleep 600; exec "$0" "$@"
+  sleep 600; exec "$SELF" "$@"
 fi
 # 文件级标志在结构化模式下同样映射 rc=6（读态后再查一次）
 for f in STOP HOLD CAMPAIGN-DONE BLOCKED-USER; do
@@ -1321,6 +1333,23 @@ json.dump(man, open(os.path.join(td, "manifest.json"), "w"), indent=1)
 PYMS
 fi
 mkdir -p "$TD"
+# A work packet is an execution handoff, never a new scientific admission gate.
+SESSION_ACTION=resume
+if [ -f "$WORK_UNIT" ]; then
+  UNIT_MSG="$TD/context-prompt.md"
+  if [ -z "${LEMVO_MESSAGE_KIND:-}" ]; then
+    if [ "$MSG_OWNED" = yes ]; then export LEMVO_MESSAGE_KIND=runtime; else export LEMVO_MESSAGE_KIND=user; fi
+  fi
+  if [ "${LEMVO_MESSAGE_KIND:-}" = user ] && [ -z "${LEMVO_CURRENT_MESSAGE_PATH:-}" ]; then
+    export LEMVO_CURRENT_MESSAGE_PATH="${CALLER_MSG:-}"
+  fi
+  if python3 "$WORK_UNIT" prepare "$TD" "$MSG_SOURCE" "$UNIT_MSG" --engine "$ENGINE" --session-file "$SID_FILE"; then
+    MSG_SOURCE="$UNIT_MSG"
+    SESSION_ACTION=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("session_action","resume"))' "$TD/context-plan.json")
+  else
+    say "Work packet warning: use existing runtime message; original task, state and authorization remain available."
+  fi
+fi
 ENGINE_JSON="$TD/engine.json"
 ADAPTER_START=$(pid_start $$)
 python3 - "$ENGINE_JSON" "$$" "$ADAPTER_START" "$ENGINE" <<'PYE'
@@ -1380,6 +1409,12 @@ if not os.path.exists(p):   # 幂等：已有结果不覆盖（recover 场景）
     os.replace(tmp, p)
 PYRJ
   python3 "$RUNTIME_CONTRACT" receipt "$TD" || return 4
+  if [ -f "$WORK_UNIT" ]; then
+    local work_rc="$3"
+    case "$1" in failed|service-error|protocol-error) [ "$work_rc" = 0 ] && work_rc=9;; esac
+    python3 "$WORK_UNIT" settle "$TD" --rc "$work_rc" --session-file "$SID_FILE" \
+      || say "Work result warning: runtime result and original evidence retained; next turn can reconstruct the handoff."
+  fi
 }
 finalize_engine_json() {  # $1=最终 status
   [ -f "$ENGINE_JSON" ] && python3 - "$ENGINE_JSON" "$1" <<'PYEF'
@@ -1393,16 +1428,17 @@ PYEF
 # ── 5) 真续接调用（双引擎；输出入 turn 目录；PID+starttime 身份发布）──
 run_engine() {
   local engpid engstart watch_rc
+  SID=""
   python3 "$RUNTIME_SUPPORT" watchdog-config || { emit_reason "CONFIG_INVALID"; exit 64; }
   if [ "$ENGINE" = "claude" ]; then
-    if [ -s "$SID_FILE" ]; then
+    if [ "$SESSION_ACTION" = resume ] && [ -s "$SID_FILE" ]; then
       SID="$(cat "$SID_FILE")"
       "$CLAUDE_BIN" -p "$(cat "$MSG_SOURCE")" --resume "$SID" --output-format stream-json --verbose --include-partial-messages $CLAUDE_PERMS > "$TD/engine-stdout.jsonl" 2> "$TD/engine-stderr.log" &
     else
       "$CLAUDE_BIN" -p "$(cat "$MSG_SOURCE")" --output-format stream-json --verbose --include-partial-messages $CLAUDE_PERMS > "$TD/engine-stdout.jsonl" 2> "$TD/engine-stderr.log" &
     fi
   else
-    if [ -s "$SID_FILE" ]; then
+    if [ "$SESSION_ACTION" = resume ] && [ -s "$SID_FILE" ]; then
       SID="$(cat "$SID_FILE")"
       codex exec --skip-git-repo-check --json -s "$CODEX_SANDBOX" resume "$SID" "$(cat "$MSG_SOURCE")" < /dev/null > "$TD/engine-stdout.jsonl" 2> "$TD/engine-stderr.log" &
     else
@@ -1456,8 +1492,15 @@ NEW_SID=$( grep -h -oE '"session_id"[": ]+[a-f0-9-]{8,}' "$TD/engine-stdout.json
         || grep -h -oE '"thread_id"[": ]+[a-f0-9-]{8,}' "$TD/engine-stdout.jsonl" 2>/dev/null | head -1 | grep -oE '[a-f0-9]{8}-[a-f0-9-]+' \
         || grep -h -oiE 'session( id|_id)?: [a-f0-9-]{8,}' "$TD/engine-stdout.jsonl" 2>/dev/null | head -1 | grep -oE '[a-f0-9]{8}-[a-f0-9-]+' \
         || true )
-[ -n "$NEW_SID" ] && { [ "$NEW_SID" != "$(cat "$SID_FILE" 2>/dev/null || true)" ] && echo "$NEW_SID" > "$SID_FILE"; }
-CUR_SID="$(cat "$SID_FILE" 2>/dev/null || true)"
+# Attribute usage to the actual attempt. Commit a new session pointer only after
+# a successful terminal outcome, so failed fresh dispatch keeps the recoverable SID.
+CUR_SID="${NEW_SID:-${SID:-}}"
+# An interrupted first invocation can already have a real recoverable session.
+# Preserve that identity when there is no prior pointer; do not replace an older
+# usable session after a failed fresh attempt or count this as successful work.
+if [ "${LEMVO_TURN_INTERRUPTED:-no}" = yes ] && [ -n "$NEW_SID" ] && [ ! -s "$SID_FILE" ]; then
+  printf '%s\n' "$NEW_SID" > "$SID_FILE.tmp-$$" && mv "$SID_FILE.tmp-$$" "$SID_FILE"
+fi
 
 # ── 7) 失败分类（A1 收口：服务/账号错误 ≠ 会话死亡 ≠ 研究停滞）──
 if [ "$LEMVO_TURN_INTERRUPTED" = yes ]; then
@@ -1544,6 +1587,9 @@ else
     if [ "$RC_MODE" = "structured" ]; then exit 9; fi
     exit 1
   fi
+  if [ -n "$NEW_SID" ] && [ "${LEMVO_TURN_INTERRUPTED:-no}" != yes ]; then
+    printf '%s\n' "$NEW_SID" > "$SID_FILE.tmp-$$" && mv "$SID_FILE.tmp-$$" "$SID_FILE"
+  fi
   if [ -n "$CUR_SID" ]; then   # v4.3d：无真实 SID 不写 resume-ok
     OK=$(mktemp); printf '{"type":"resume-ok","turn_id":"%s","sid":"%s","ts":"%s"}\n' "$TURN_ID" "$CUR_SID" "$(date -u +%FT%TZ)" > "$OK"
     helper ledger-append < "$OK" || true; rm -f "$OK"
@@ -1580,7 +1626,7 @@ python3 "$HELPER" account "$TURN_ELAPSED" "$U_IN" "$U_OUT" >/dev/null \
 # codex 每调独立（per-call）。不把累计值逐轮相加，state total_cost 保持不累计。
 COST_DELTA=unknown; COST_BASIS=unknown
 if [ "$U_COST" != "unknown" ]; then
-  CD_OUT=$(python3 "$HELPER" cost-delta "$(cat "$SID_FILE" 2>/dev/null || echo none)" "$U_COST" "$ENGINE" 2>/dev/null || true)
+  CD_OUT=$(python3 "$HELPER" cost-delta "${CUR_SID:-none}" "$U_COST" "$ENGINE" 2>/dev/null || true)
   COST_DELTA=$(printf '%s\n' "$CD_OUT" | sed -n 's/^COST_DELTA=//p')
   COST_BASIS=$(printf '%s\n' "$CD_OUT" | sed -n 's/^COST_BASIS=//p')
   [ -z "$COST_DELTA" ] && COST_DELTA=unknown
@@ -1590,7 +1636,7 @@ PREP_SNAP=$(python3 "$HELPER" prep-snapshot 2>/dev/null || true)
 T_ART=$(printf '%s\n' "$PREP_SNAP" | grep -oE 'LAST_ARTIFACT=.*' | cut -d= -f2-)
 [ -z "$T_ART" ] && T_ART=none
 export T_ART
-SESSION_TAG=$(cat "$SID_FILE" 2>/dev/null || echo none)
+SESSION_TAG="${CUR_SID:-none}"
 TURN_F=$(mktemp)
 T_TYPE="work-turn"; [ "${NEW_PROGRESS:-no}" != "yes" ] && T_TYPE="prep-turn"
 [ "$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["kind"])' "$LEMVO_PROGRESS_RECORD")" = waiting ] && T_TYPE="wait-assessment"

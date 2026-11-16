@@ -36,6 +36,7 @@
 set -uo pipefail
 CMD="${1:-}"; PROJ="${2:-}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
+SELF="$HERE/$(basename -- "$0")"
 RUNTIME_SUPPORT="$HERE/runtime-support.py"
 RUNTIME_CONTRACT="$HERE/runtime-contract.py"
 [ -f "$RUNTIME_SUPPORT" ] || { echo "Missing runtime-support.py: install the complete research-orchestrator skill."; exit 64; }
@@ -77,7 +78,7 @@ set_status() {  # $1=状态[|细节]（或 $1=状态 $2=细节）；中央解析
   fi
 }
 
-usage() { sed -n '2,26p' "$0" | sed 's/^# \{0,1\}//'; exit 64; }
+usage() { sed -n '2,26p' "$SELF" | sed 's/^# \{0,1\}//'; exit 64; }
 [ -n "$CMD" ] && [ -n "$PROJ" ] || usage
 cd "$PROJ" || { echo "项目目录不存在: $PROJ"; exit 64; }
 PROJ="$(pwd -P)"
@@ -182,7 +183,7 @@ case "$CMD" in
   renew)
     python3 "$RUNTIME_SUPPORT" renew-turn "${3:-1800}"; exit $?;;
   doctor)
-    python3 "$RUNTIME_SUPPORT" doctor "$0"; exit $?;;
+    python3 "$RUNTIME_SUPPORT" doctor "$SELF"; exit $?;;
   repair-prep)
     [ -n "${3:-}" ] && [ -n "${4:-}" ] || { echo 'repair-prep <project> <incident-archive> <reason> [--apply]'; exit 64; }
     python3 "$RUNTIME_SUPPORT" repair-prep "$3" "$4" "${5:-}"; exit $?;;
@@ -205,7 +206,7 @@ case "$CMD" in
           say "owner 锁初始化中——不重复拉起，稍后用 status 复查"
         else
           say "无活跃控制器——自动拉起（nohup，日志 $RUNLOG）"
-          nohup bash "$0" start "$PROJ" --resume >> "$RUNLOG" 2>&1 &
+          nohup bash "$SELF" start "$PROJ" --resume >> "$RUNLOG" 2>&1 &
           say "控制器已拉起 pid=$!"
         fi;;
       *) usage;;
@@ -393,6 +394,15 @@ import json, sys
 r = json.load(open(sys.argv[1]))
 print("- %s: status=%s run_id=%s exit_code=%s done_file=%s (run 事实；请读结果、改方法、继续；勿重跑同 run_id)" % (
     r.get("name"), r.get("status"), r.get("run_id"), r.get("exit_code"), r.get("done_file")))
+# Reuse already parsed producer fields. Do not guess metrics from log text,
+# change units, or treat missing values as zero.
+payload = {"metrics": r.get("metrics"), "result": r.get("result")}
+if any(v is not None for v in payload.values()):
+    encoded = json.dumps(payload, ensure_ascii=False)
+    if len(encoded) <= 5000:
+        print("  Recorded producer result (scope/settings remain as supplied): " + encoded)
+    else:
+        print("  Large producer result retained in receipt %s; read the relevant fields rather than the full training log." % sys.argv[1])
 PYC
   done
   echo "$out"
@@ -541,6 +551,7 @@ PYC2
 # ── E1：共用 step —— 组装本批 steer+回执（advance 与主循环同一路径）──
 assemble_step_message() {  # 设置 MSG_FILE（可空）与 TD 引用清单
   MSG_FILE=""
+  USER_MSG_SOURCE=""
   local SNAP RCPT
   SNAP=$(steer_snapshot) || return 4
   RCPT=$(consume_receipts_snapshot || true)
@@ -554,6 +565,10 @@ assemble_step_message() {  # 设置 MSG_FILE（可空）与 TD 引用清单
   fi
   if [ -n "$TD" ] && [ -n "$MSG_FILE" ]; then
     cp "$MSG_FILE" "$TD/input.md"
+    if [ -n "$SNAP" ]; then
+      cp "$SNAP" "$TD/steer-message.md"
+      USER_MSG_SOURCE="$TD/steer-message.md"
+    fi
     [ -s "$MSG_FILE.rlist" ] && cp "$MSG_FILE.rlist" "$TD/job-batch.list"
     [ -s "$MSG_FILE.slist" ] && cp "$MSG_FILE.slist" "$TD/steer-published.list"
     [ -n "$SNAP" ] && [ -s "$SNAP.superseded.list" ] && cp "$SNAP.superseded.list" "$TD/steer-superseded.list"
@@ -564,6 +579,10 @@ dispatch_step() {  # 派发单轮；捕获引擎 stdout 解析结构化 reason�
   local logf rc
   set_status "RUNNING|turn-${TURN:-adv}"
   logf=$(mktemp)
+  # Receipts are runtime events; only a delivered steer batch is new user input.
+  export LEMVO_MESSAGE_KIND=runtime
+  export LEMVO_CURRENT_MESSAGE_PATH="${USER_MSG_SOURCE:-}"
+  if [ -n "${MSG_FILE:-}" ] && [ -s "$MSG_FILE.slist" ]; then export LEMVO_MESSAGE_KIND=user; fi
   if [ -n "${MSG_FILE:-}" ]; then
     bash "$AUTOLOOP" "$PROJ" "$MSG_FILE" > "$logf" 2>&1
   else
@@ -630,7 +649,7 @@ except Exception: print("");print("")' "$EJ" 2>/dev/null)
   done
   if [ "$WRITERS_ALIVE" -ne 0 ]; then echo "Runtime writer still alive; reset fenced but evidence not moved."; exit 1; fi
   mkdir -p "$ARC"
-  for X in turns .lemvo-recovery.sqlite3 .lemvo-receipts .autoloop-session-id .autoloop-summary.md \
+  for X in turns .lemvo-context.json .lemvo-last-work-result.json .lemvo-recovery.sqlite3 .lemvo-receipts .autoloop-session-id .autoloop-summary.md \
            .autoloop-stall-count .autoloop-poison-count .autoloop-turn-active .autoloop-engine.pid; do
     [ -e "$X" ] && mv "$X" "$ARC/"
   done
@@ -648,7 +667,7 @@ if [ "$CMD" = "advance" ]; then
   MSG="${3:-}"
   if owner_alive; then
     touch "$REQ_ADV"
-    [ -n "$MSG" ] && [ -f "$MSG" ] && bash "$0" steer "$PROJ" "$MSG"
+    [ -n "$MSG" ] && [ -f "$MSG" ] && bash "$SELF" steer "$PROJ" "$MSG"
     say "owner 活跃（pid=$(owner_pid)）——推进请求已提交，未并行启动模型"
     exit 0
   fi
@@ -697,7 +716,7 @@ owner_take || { echo "已有活跃控制器（pid=$(owner_pid)）或锁初始化
 trap owner_release EXIT
 mkdir -p "$QUEUE" "$ARCHIVE" "$RECEIPTS" "$TURNSD"
 [ -n "$DELEGATION" ] && echo "$DELEGATION" > .lemvo-delegation
-python3 "$RUNTIME_SUPPORT" doctor "$0" > .lemvo-takeover-inventory.json
+python3 "$RUNTIME_SUPPORT" doctor "$SELF" > .lemvo-takeover-inventory.json
 cp .lemvo-takeover-inventory.json .lemvo-runtime-at-start.json
 python3 - <<'PYINV'
 import json

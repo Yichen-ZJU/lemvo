@@ -1,5 +1,14 @@
 # 2026-11-10 — Neighbor mechanisms in method generation
 
+## 2026-11-16 — Work-unit dispatch and context handoffs
+
+- Dispatch concrete tasks and retain structured or backward-compatible work results; no new scientific approval gate.
+- Preserve campaign state, authorization, job IDs and accounting across safe fresh/resume session selection.
+- Reuse unchanged source material, project bounded context and return existing producer metrics without guessing missing values.
+- Prevent stale recovered work, queue metadata and purged handoffs from reviving old tasks; retain interrupted first-session identity.
+- Validation: all four distribution suites and desktop installation tests passed. Real Claude CPU two-work-unit loop passed; Codex runtime fixtures passed, while real tool execution is blocked by host sandbox/network conditions. No fixed token savings claim.
+
+
 - Carry neighboring methods' actual operations, inputs/outputs and necessary conditions into generation, then adapt them to target conditions rather than adding citations after drafting.
 - Reuse the existing candidate schema and read-only context helper; optional repeatable --methods forwards source notes before candidates, preserving legacy calls and missing-note fallback. Explicit UTF-8 output supports Windows consumers.
 - Connect literature assets, brainstorming, orchestrator, Forge/Autoresearch, native Arbor skill/freeform prompts and AutoScientists analyst handoff. No new research stage, role, source quota or novelty gate.

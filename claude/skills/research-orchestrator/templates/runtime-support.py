@@ -541,7 +541,7 @@ def doctor(controller):
     current = Path(controller).resolve()
     report['invoked_controller'] = str(current)
     report['sha256'] = hashlib.sha256(current.read_bytes()).hexdigest()
-    bundle=('lemvo-run.sh','autoloop-reference.sh','runtime-support.py','runtime-contract.py')
+    bundle=('lemvo-run.sh','autoloop-reference.sh','runtime-support.py','runtime-contract.py','work-unit.py')
     report['bundle']={name:hashlib.sha256((current.parent/name).read_bytes()).hexdigest()
         if (current.parent/name).is_file() else None for name in bundle}
     report['complete_bundle']=all(report['bundle'].values())

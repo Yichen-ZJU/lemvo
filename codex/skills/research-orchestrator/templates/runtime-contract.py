@@ -19,7 +19,8 @@ HUMAN = {'WAITING_USER', 'HOLD', 'EVIDENCE_HOLD', 'STOPPED_INCONCLUSIVE',
          'BLOCKED', 'BLOCKED_USER', 'BLOCKED-USER'}
 DONE = {'COMPLETED', 'CONCLUDED', 'CAMPAIGN_DONE', 'CAMPAIGN-DONE'}
 META = {'research-state.yaml', 'STATE.md', 'campaign_log.txt', 'research-log.md',
-        'CHANGELOG.md', 'CHARTER.md'}
+        'CHANGELOG.md', 'CHARTER.md', 'work-unit.json', 'context-plan.json',
+        'work-result.json', 'work-settlement.json', 'context-prompt.md'}
 PROTECTED_SCOPES = {'global', 'constraints', 'authorization', 'safety'}
 
 
