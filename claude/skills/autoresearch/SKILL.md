@@ -1,6 +1,6 @@
 ---
 name: autoresearch
-description: Autonomous experiment loop with evidence-driven move selection — scales from parameter tuning (directional search) to architecture innovation (structural changes), with git ledger, guard, noise-aware keep/discard, and trend-analysis stop advice. Use when the user asks to optimize a research metric, run an experiment loop, tune hyperparameters, explore architectural changes, or improve model performance iteratively.
+description: Autonomous experiment loop with evidence-driven move selection — scales from parameter tuning (T0/T1) to mechanism & architecture leaps (T2/T3) with incubation protection, duplicate-config guard, git ledger, and trend-driven escalation. Use when the user asks to optimize a research metric, run an experiment loop, tune hyperparameters, explore architectural changes, or improve model performance iteratively.
 argument-hint: <idea>
 ---
 
@@ -13,7 +13,7 @@ The optional `../shared-references/scripts/construction_context.py --methods <no
 argument can carry selected mechanism notes with the candidate. Reuse or adapt the
 actual component and record the concrete change, without a new literature/review gate.
 
-自主实验循环。单策略表覆盖两种尺度：**参数级微调**（改大改小/换参数）和**架构级创新**（结构性改动）。
+自主实验循环。单策略表覆盖多种尺度：**T0/T1 参数与配方探索**（核对/重排/调参）与 **T2/T3 机制及架构跃迁**（新目标、新数据/推理机制、结构重构），并受错例诊断与成长期保护驱动，防止陷在同一方法家族里做“小农式”微雕。
 
 分工：本 skill 负责**运行**循环。两种入口：
 - **完整任务包**（锁定评估 + 开放文件 + program.md，可交付的自驱包）→ 缺失时
@@ -39,7 +39,7 @@ Session files: `autoresearch.md`, `autoresearch.sh`, `autoresearch.jsonl`, `resu
 
 | | 交互式（默认） | 无人值守（`claude -p` / program.md 驱动） |
 |---|---|---|
-| 停止建议 | 只是建议，用户决定 | 不停止；停滞 → 强制"升级"选步 |
+| 停止建议 | 只是建议，用户决定 | 不停止；停滞 → 强制"升级 / 机制跃迁" |
 | 硬停止 | maxIterations / 用户打断 | maxIterations / timeout |
 | 问用户 | 环境选择、计划确认、停滞建议 | 不问（NEVER STOP） |
 
@@ -51,11 +51,11 @@ Session files: `autoresearch.md`, `autoresearch.sh`, `autoresearch.jsonl`, `resu
 - 工作树不干净 / detached HEAD → **不再"开专支即可"**（旧规则会让实验 revert 吞掉用户未提交修改）：
   1. 记录基线 SHA：`git rev-parse HEAD`。
   2. 把用户未提交改动固化为独立 commit：`chore: wip snapshot before autoresearch (<tag>)`。实验 revert 链从此只碰 `experiment:` commit，用户工作永远在链外。
-  3. **三份内容快照，各有用途、时机不同**（只存最初一份会在合法 keep 之后误判）：
-     - **user-wip**：iteration 0 之前，用户原始 WIP 状态的 sha256 清单，随 wip snapshot commit 提交（如 `.autoresearch-user-wip.sha256`）。**永不作为 revert 目标**——它保护的是用户工作本身；收尾验证"用户内容未被实验污染"时对比它。
-     - **iter-start**：每轮 modify 之前，对 scope 内文件做 sha256 清单（内存或 `.autoresearch/state/`，**不提交**）。它是本轮 discard 的校验对象——`git revert HEAD` 后文件内容应对齐 iter-start 快照。
-     - **last-good**：最近一次 keep 之后的状态（初始 = user-wip）。真正的"安全回滚目标"：多轮 keep 后的 discard 若只 revert 一轮不够，回到 last-good 必可运行。
-     清单绝不能留到实验 commit 里——revert 实验 commit 会把其中新增的文件一并删除。收尾验证用 `git show <snapshot-sha>:.autoresearch-user-wip.sha256` 对比，不只看分支名。
+  3. **三份内容快照，各有用途、时机不同**：
+     - **user-wip**：iteration 0 之前，用户原始 WIP 状态的 sha256 清单，随 wip snapshot commit 提交（如 `.autoresearch-user-wip.sha256`）。**永不作为 revert 目标**。
+     - **iter-start**：每轮 modify 之前，对 scope 内文件做 sha256 清单（**不提交**）。它是本轮 discard 的校验对象。
+     - **last-good**：最近一次 keep 之后的状态（初始 = user-wip）。多轮 keep 后的 discard 若只 revert 一轮不够，回到 last-good 必可运行。
+     清单绝不能留到实验 commit 里。收尾验证用 `git show <snapshot-sha>:.autoresearch-user-wip.sha256` 对比，不只看分支名。
   4. detached HEAD → 先建工作分支再进循环。
   无人值守模式同样执行，不跳过。
 
@@ -67,11 +67,11 @@ Session files: `autoresearch.md`, `autoresearch.sh`, `autoresearch.jsonl`, `resu
 - 优化目标、benchmark 命令、指标名/单位/方向
 - 可改文件范围（scope）
 - **改动尺度（scale）**：三选一 ——
-  - `params`：只调参数（超参/配置/小 trick），锁死架构改动
-  - `arch`：只做架构/方法级改动，不在参数上磨
-  - `auto`（默认）：不设限，每轮由选步表按上轮结果自由决定（参数级和架构级可混用）
+  - `params`：只调参数/配置（仅当用户显式限制架构时使用）
+  - `arch`：专注机制/架构/数据表示级 `T2`/`T3` 改动，参数只作配套
+  - `auto`（默认）：全策略可用，优先在验证饱和后及时从 `T0`/`T1` 跃迁到 `T2`/`T3`
 - **Guard 命令**（可选但推荐）：每轮必须通过的安全检查（如冒烟测试）
-- **min_delta**（可选）：小于此幅度的改进触发确认跑——它是**追加测量触发器，不是 keep 门槛**（r29 A7）：复测后同向小正信号保留并记录确认状态；只有任务/用户显式声明"最小实用效应"时才按声明决定保留
+- **min_delta**（可选）：小于此幅度的改进触发确认跑——它是**追加测量触发器，不是 keep 门槛**（r29 A7）：复测后同向小正信号保留并记录确认状态；只有任务/用户显式声明"最小实用效应"时才按声明决定保留；且**噪声带内的微小改善不重置 `T0`/`T1` 宏平台期计数**
 - maxIterations（默认 20；无人值守模式建议 50+ 或 unlimited）
 
 未明确指定 scale 时默认 `auto` 并在确认计划时向用户说明。
@@ -90,40 +90,36 @@ Session files: `autoresearch.md`, `autoresearch.sh`, `autoresearch.jsonl`, `resu
 
 每一轮：
 
-### 4.1 Review（读历史，别凭记忆）
+### 4.1 Review（读历史与策略账，别凭记忆）
 - 读 `results.tsv` 最近 10-20 行 + `git log --oneline -20`
+- 若运行目录下有 `research-strategy.py`（或主控注入了 `RESEARCH STRATEGY LEDGER`），先确认：当前家族是否已 `SATURATED` / `CLOSED`、是否存在处于 `INCUBATING` 保护期的分支、`incremental_streak` 是否逼近平台阈值，并避免与历史 config 重复
 - 上轮是 keep → `git diff HEAD~1` 看具体改动
-- 明确：什么worked、什么failed、什么没试过
+- 明确：什么worked、什么failed、哪个家族已经饱和、下一步该继续还是跃迁
 
-### 4.2 选步（策略表，证据驱动）
+### 4.2 选步（策略表，证据与错例驱动）
 
-**新机制构思的明确路由**：用户要求“想想有什么值得做的/提出下一种方法”，或
-选步进入 escalate / change-strategy 且需要新的方法机制时，读取
-[brainstorming-research-ideas](../brainstorming-research-ideas/SKILL.md) 与
-[neighbor-to-method](../shared-references/neighbor-to-method.md)。把当前目标、实际
-父实现、最近结果及已有近邻操作一起传入，在当前会话完成所需构思，选定具体
-改动后回到 4.3 Modify → Run；不插入 idea-evaluator 或新的批准环节。已有明确
-改法时直接实施。scale=params 仍尊重用户所选范围：范围内可构思参数/配方，
-需要结构性改动则按现有规则交回外循环处理范围调整。来源笔记按需复用，
-构思不要求重开综述、证明全场景效果或完成一套新表单。
+**新机制与错例分析的明确路由**：用户要求“想想有什么值得做的/提出下一种方法”，或进入 `escalate` / `incubate` / `leap`（包括连续 `T0`/`T1` 平台触发 `OUTER_MACRO_REVIEW`）时：先抽取当前最强模型的 **20–50 个失败案例归纳 Failure Taxonomy**（必要时运行 `research-strategy.py record-failure-taxonomy`），再读取 [macro-strategy](../research-orchestrator/references/macro-strategy.md)、[brainstorming-research-ideas](../brainstorming-research-ideas/SKILL.md) 与 [neighbor-to-method](../shared-references/neighbor-to-method.md)，生成**正交的 `T2`/`T3` 机制或架构方案**。已有明确 `T2`/`T3` 改法时直接实施。scale=params 仍尊重用户所选范围：范围内构思配方，需要结构性改动则交回外循环处理范围调整。
 
-| 选步 | 触发 | 动作 |
-|---|---|---|
-| 跟进 follow | 上轮改进 | 同杠杆同方向再进一步 |
-| 反转 reverse | 上轮变差 | 同杠杆反方向 |
-| 换杆 switch | 上轮无变化 | 换参数/换模块 |
-| 升级 escalate | plateau（连续 5 轮无 keep） | 合并历次 near-miss / 结构性改动 / 读参考文献找角度 |
-| 简化 simplify | 指标持平但代码更少 | 保留，记 keep（简洁性胜利） |
+| 选步 | 触发 | 层级 | 动作 |
+|---|---|---|---|
+| 跟进 `follow` | 上轮有显著/超噪声带改进 | T1/T2 | 同杠杆同方向深化或补配对验证 |
+| 反转 `reverse` | 上轮变差 | T1 | 同杠杆反方向 |
+| 换杆 `switch` | 上轮无变化 | T1/T2 | 换模块/换特征/换约束（不得在同一饱和小参数内微调打转） |
+| 孵化 `incubate` | 新启用 `T2`/`T3` 家族前 2–3 轮 | T2/T3 | **成长期保护**：允许粗糙初版暂低于老 champion，重在诊断改善与打通链路，不因首跑输老精调基线立刻 revert 判死 |
+| 跃迁 `leap` | 主线陷入 `T0`/`T1` 平台（连续 ≥4-5 轮未破噪声带）或 `macro_review` 触发 | T2/T3 | 先做错例 Failure Taxonomy，直接做机制/数据构造/训练或推理范式重构 |
+| 升级 `escalate` | 连续多轮无真实突破或发现当前表示/目标上限 | T2/T3 | 合并历次 near-miss / 机制替换 / 读文献切新方向 |
+| 简化 `simplify` | 指标持平但代码更少更稳 | T1 | 保留，记 keep（简洁性胜利） |
 
-这是策略指导不是状态机 —— 每轮在 jsonl 里记 `move` 类型和理由。
+这是策略指导不是僵化状态机 —— 每轮在 jsonl 里同时记 `move`、`intervention_tier`（`T0`–`T3`）、`family_id` 与理由。
 
 **尺度约束（scale）对选步表的裁剪**：
-- `params`：**禁用 escalate**（不做架构改动）。plateau 时不升级，而是换杆到未试过的参数/重新扫范围；真没参数可动了就向用户报告并建议是否解除限制。
-- `arch`：**跳过参数微调**，follow/reverse/switch 都作用于模块/结构层面；参数只作为新架构的配套调整。
-- `auto`：全表可用，尺度切换由证据驱动。
+- `params`：**禁用 `leap`/架构 escalate**。plateau 时换未试过的参数区间或向用户报告申请解除限制。
+- `arch`：**跳过纯参数微调**，重点使用 `incubate`/`leap`/`switch` 在机制与结构层面推进；参数仅作新架构配套。
+- `auto`：全表可用，由噪声带突破与家族饱和度证据驱动，禁止同一家族 `SATURATED` 后继续滞留 `T1`。
 
-### 4.3 Modify + Commit
-- 原子改动（一个逻辑单元），只在 scope 内
+### 4.3 Modify + Commit + 去重拦截
+- 启动耗时运行前，若存在 `research-strategy.py` 且有配置对象，先执行 `research-strategy.py check-dup --root . --family <family> --config-json '<json>'`，拦截同配置重跑（防止类似重复跑同一 seed/recipe 浪费 GPU）。
+- 原子改动（一个清晰逻辑单元），只在 scope 内
 - commit message 前缀 `experiment: {描述}`，记录 SHA
 
 **方法改动的就地检查（按改动选择，不另起审查）**：修改权重、掩码、
@@ -139,49 +135,53 @@ Session files: `autoresearch.md`, `autoresearch.sh`, `autoresearch.jsonl`, `resu
 grep "^<metric_name>:" run-<N>.log    # 只提取指标行
 ```
 grep 为空 ≠ 直接判崩溃——先分类（r29 A6：进程退出码 / 解析状态 / 科学成绩三者分开）：退出码非零或有栈 = **crash**（`tail -n 50 run-<N>.log` 看栈）；退出码为零但日志里有合法指标、只是格式与 grep 模式不符（如 JSON `{"accuracy":0.91}` vs `^accuracy:`）= **metric-error**（适配失配，修提取模式后重新提取，不改评判协议）；退出码为零且全无指标 = 按 crash 排查。results.tsv 的 iteration 列与日志文件号一一对应，可对账。
-**同迭代内的每次执行各用各的文件**：确认跑 `run-<N>-confirm<K>.log`（K=1,2，各自留档），第 K 次修复跑 `run-<N>-fix<K>.log`——同文件覆盖会让崩溃证据链断掉。
+**同迭代内的每次执行各用各的文件**：确认跑 `run-<N>-confirm<K>.log`（K=1,2，各自留档），第 K 次修复跑 `run-<N>-fix<K>.log`。
 
-### 4.5 Verify（噪声防护）
-- 改进幅度 < min_delta → **确认跑**：重跑 1-2 次取中位数确认方向一致性（日志写 `run-<N>-confirm.log`）；中位数仍同向改进 → **keep 并记录确认状态**（小正信号不因低于任意绝对阈值被抹掉，r29 A7；仅任务/用户显式声明的最小实用效应可另作保留门槛）
-- 指标非数字/提取失败 → 记 `metric-error`，先按 4.4 分类：格式适配失配则修提取模式重新提取（评判协议不变），commit 确实坏掉才 revert
+### 4.5 Verify（噪声防护与平台期分离）
+- 改进幅度 < `min_delta`（或位于已知种子 `noise_band` 内） → **确认跑**：重跑 1–2 次取中位数确认方向一致性（日志写 `run-<N>-confirm.log`）；中位数仍同向改进 → **keep 并记录确认状态**（r29 A7：不抹除同向小正信号），但**明确标记尚未构成突破（non-breakthrough），不重置宏平台期计数**；只有突破噪声带/CI 排零的进展才重置增量计数。
+- 指标非数字/提取失败 → 记 `metric-error`，先按 4.4 分类：格式适配失配则修提取模式重新提取（评判协议不变），commit 确实坏掉才 revert。
 
 ### 4.6 Guard（如配置）
 Guard 失败 → 无论指标如何都 revert（保护可运行分支），记 `guard-fail`，先定位工程原因、暂存候选。修复重试上限只约束当前迭代——Guard 失败是工程事件，**不构成方向否证**（r29 A6）。
 
-### 4.7 Decide（分态判定，与 contract v2.2 status 枚举一致）
-- **keep**：指标按既定比较口径改进（过确认跑的见 4.5）且 Guard 过 → 分支前进
-- **discard**：指标变差 → `git revert HEAD --no-edit`（**不用 reset —— 失败保留在历史里供学习**）；revert 后按本轮 iter-start 快照校验文件内容确已还原
-- **crash**：运行崩溃 → 语法/导包错误立即免费修复重跑（日志 `run-<N>-fix<K>.log`）；运行时错误最多自动修 3 次（只限当前迭代，不据此否证方法）；修不好 revert 记 crash，metric 列留空（不写占位 0）
-- **timeout**：超过 kill 阈值的执行中断 → revert 记 `timeout`，**不是科学否证**（r29 A4）；等时间协议下在描述里注明协议性不可比
-- **metric-error**：正常退出但指标解析失败 → 按 4.4 分类处置，不与 crash 混记
-- **no-op**：本轮无有效改动
-- **blocked**：外部依赖失效（数据集/服务/权限）
+### 4.7 Decide（分态判定，与 contract v2.3 status 枚举一致）
+- **keep**：指标按既定比较口径改进（过确认跑的见 4.5）且 Guard 过；或 `move=incubate/leap` 处于成长期保护期且需保留以继续下一版迭代 → 分支前进（仅当真正超越 `best_value` 时覆盖 `best_value`）。
+- **discard**：指标未改进且不在 `incubate` 保护期内 → `git revert HEAD --no-edit`（**不用 reset —— 失败保留在历史里供学习**）；revert 后按本轮 iter-start 快照校验文件内容确已还原。若处于 `INCUBATING` 新家族首两轮，优先做基于错例的修复/深化（`incubate`）而非直接淘汰整个方向。
+- **crash**：运行崩溃 → 语法/导包错误立即免费修复重跑（日志 `run-<N>-fix<K>.log`）；运行时错误最多自动修 3 次（只限当前迭代，不据此否证方法）；修不好 revert 记 crash，metric 列留空（不写占位 0）。
+- **timeout**：超过 kill 阈值的执行中断 → revert 记 `timeout`，**不是科学否证**（r29 A4）。
+- **metric-error**：正常退出但指标解析失败 → 按 4.4 分类处置，不与 crash 混记。
+- **no-op**：本轮无有效改动。
+- **blocked**：外部依赖失效（数据集/服务/权限）。
 
 ### 4.8 Log
 `results.tsv`（TAB 分隔）：`iteration timestamp commit metric delta guard status move description`
-`autoresearch.jsonl`：完整 JSON 行（hypothesis、files changed、wall time、evidence pointer）
+`autoresearch.jsonl`（及 `logs/experiments.jsonl`，若接主控）：完整 JSON 行（`exp_id`、`family_id`、`intervention_tier` `T0`–`T3`、`config`、`hypothesis`、`metric`、`paired_ci`/`significant`、`files changed`、`wall time`、`evidence pointer`）。
 
 ### 4.9 Checkpoint（每 5 轮）
-趋势分析：keep 率、连续 discard 数、delta 递减、最大单次飞跃。
-输出建议：**continue / change-strategy / stop**（交互式=建议；无人值守=change-strategy 时强制 escalate）。
+趋势分析：各 `T0`–`T3` 层级占比、饱和家族列表、是否连续在噪声带内波动、最大单次飞跃、错例根因是否缓解。
+输出建议：**continue / leap-to-T2-T3 / change-strategy / stop**（交互式=建议；无人值守=平台期强制 `leap`/`escalate`）。
 
-### 4.10 停滞规则
-连续 10 轮无 keep：
-- 交互式 → 停下来向用户汇报趋势和建议
-- 无人值守 → 自动执行升级选步（合并 near-miss / 激进重构 / 换 hypothesis 空间），记入 jsonl
+### 4.10 停滞与跃迁规则
+触发条件（满足任一）：
+- 传统停滞：连续 10 轮无任何 keep；
+- **宏平台期（Incrementalism Plateau）**：连续 5 轮已完成实验均为未突破噪声带/未排零的 `T0`/`T1` 改动（即使有 `min_delta` 内微小波动的 keep）。
+
+处置：
+- 交互式 → 列出饱和家族与 `T0`/`T1` 空转统计，向用户展示 Failure Taxonomy 与 `T2`/`T3` 跃迁方案建议；
+- 无人值守 → **禁止继续加一轮同家族 `T1` 微调**，必须先做错例 Failure Taxonomy，再按 4.2 路由执行正交的 `leap`/`incubate` 新机制（`T2`/`T3`），并记入 jsonl。
 
 停滞升级选步**只能在当前 envelope（约束清单、预算、eval contract）内**进行。
-升级选步后仍停滞、或判断需要改动 envelope 本身（换评估命名空间、放宽局部
+升级跃迁后仍停滞、或判断需要改动 envelope 本身（换评估命名空间、放宽局部
 预算、修订代理自拟的配方默认）→ **交回外循环**：在 results/jsonl 与交接状态
-中写明停滞事实、已尝试的升级、建议的修订点，结束本局部循环，由 orchestrator
+中写明停滞事实、已尝试的层级与升级、建议的修订点，结束本局部循环，由 orchestrator
 走约束复审产生新版本。局部循环不得自行扩大 envelope 或无限续跑；局部 discard
 只否当前候选，不否整个方向（裁决标签见 orchestrator 裁决语义分层）。
 
 ## Step 5: 收尾
 
 循环结束（达成/停滞/上限/打断）时输出：
-- 总迭代数、keep/discard/crash 分布、baseline → 最终指标、提升 %
-- Top 3 最有效改动 + 最大失败教训
+- 总迭代数、`T0`–`T3` 分布、keep/discard/crash 分布、baseline → 最终指标、提升 %
+- Top 3 最有效改动（区分实质突破 vs 噪声内微调） + 最大失败教训 / 饱和家族汇总
 - 最优 commit 指针（`git log` 定位）
 - CHANGELOG 追加条目；关键结论按全局约定写 provenance
 

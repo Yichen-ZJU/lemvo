@@ -18,6 +18,7 @@ import time
 
 
 _IDLE_MOD = None
+_STRATEGY_MOD = None
 
 
 def _load_idle_module():
@@ -31,6 +32,19 @@ def _load_idle_module():
                 spec.loader.exec_module(mod)
                 _IDLE_MOD = mod
     return _IDLE_MOD
+
+
+def _load_strategy_module():
+    global _STRATEGY_MOD
+    if _STRATEGY_MOD is None:
+        strat = Path(__file__).with_name('research-strategy.py')
+        if strat.is_file():
+            spec = importlib.util.spec_from_file_location('_lemvo_research_strategy', str(strat))
+            if spec is not None and spec.loader is not None:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                _STRATEGY_MOD = mod
+    return _STRATEGY_MOD
 
 
 VERSION = 1
@@ -220,6 +234,11 @@ def skill_paths(kind):
         return ['paper-writing/SKILL.md', 'paper-narrative/SKILL.md']
     if any(x in name for x in ('implement', 'experiment', 'develop', 'train', '实验', '实现')):
         return ['autoresearch/SKILL.md']
+    if any(x in name for x in ('macro_review', 'macro', 'paradigm')):
+        return ['research-orchestrator/references/macro-strategy.md',
+                'brainstorming-research-ideas/SKILL.md',
+                'idea-evaluator/references/paradigm-shift-probe.md',
+                'shared-references/neighbor-to-method.md']
     if any(x in name for x in ('literature', 'research', '调研')):
         return ['research-orchestrator/SKILL.md']
     return []
@@ -407,6 +426,46 @@ def prepare(td, source, target, engine='codex', session_file='.autoloop-session-
     branch = str(branch or '')
     kind = kind or ('research' if not phase else phase)
     action, reason = choose_session(previous, current_sid, engine, phase, branch, p)
+    smod = _load_strategy_module()
+    strategy = None
+    if smod is not None:
+        try:
+            strategy = smod.analyze(Path('.'))
+        except Exception:
+            strategy = None
+    has_strategy_data = bool(strategy and (
+        strategy.get('total_experiments', 0) > 0
+        or (strategy.get('portfolio') or {}).get('slots')
+        or strategy.get('latest_failure_taxonomy')
+    ))
+    jobs = jobs_context()
+    was_waiting = isinstance(last, dict) and last.get('status') == 'waiting'
+    active_job_running = any(
+        str(j.get('status') or '').lower() in ('running', 'pending', 'queued', 'active')
+        for j in jobs
+    )
+    macro_review_active = bool(
+        strategy
+        and strategy.get('macro_review_armed') is True
+        and os.environ.get('LEMVO_MESSAGE_KIND') != 'user'
+        and not was_waiting
+        and not active_job_running
+    )
+    deferred_objective = None
+    if macro_review_active:
+        deferred_objective = objective
+        kind = 'macro_review'
+        origin = 'runtime-macro-review-gate'
+        objective = (
+            'OUTER_MACRO_REVIEW (incremental streak plateau gate): '
+            'Stop T0/T1 parameter or weight tweaks on saturated families. '
+            'First inspect 20-50 concrete failure cases and record a Failure Taxonomy '
+            '(research-strategy.py record-failure-taxonomy), then propose or incubate an '
+            'orthogonal T2/T3 mechanism/paradigm candidate (portfolio-set --slot explore) '
+            'or formally close saturated families and pivot.'
+        )
+        if p['mode'] != 'resume':
+            action, reason = 'fresh', 'macro-review-plateau'
     files = []
     for name in ('CHARTER.md', 'research-state.yaml', 'STATE.md', 'findings.md',
                  'research-log.md', 'prompt.txt'):
@@ -421,15 +480,35 @@ def prepare(td, source, target, engine='codex', session_file='.autoloop-session-
             'project_objective': first(fields, ['project.objective', 'project.question', 'objective', 'question']),
             'mode': text('.lemvo-mode').strip() or 'unspecified', 'engine': engine,
             'current_input_kind': os.environ.get('LEMVO_MESSAGE_KIND', 'runtime'),
-            'jobs': jobs_context(), 'source_refs': refs,
+            'jobs': jobs, 'source_refs': refs,
             'relevant_skill_paths': skill_paths(kind),
             'previous_result': '.lemvo-last-work-result.json' if last else None,
             'result_path': str(td / 'work-result.json')}
+    if has_strategy_data:
+        atomic(td/'strategy-snapshot.json', strategy)
+        incubating = [
+            fid for fid, fdata in (strategy.get('families') or {}).items()
+            if isinstance(fdata, dict) and fdata.get('status') == 'INCUBATING'
+        ]
+        strategy_summary = {
+            'completed_experiments': strategy.get('completed_experiments', 0),
+            'incremental_streak': strategy.get('incremental_streak', 0),
+            'macro_review_threshold': strategy.get('macro_review_threshold', 0),
+            'macro_review_triggered': macro_review_active,
+            'tier_counts': strategy.get('tier_counts', {}),
+            'duplicate_warnings_count': len(strategy.get('duplicate_warnings') or []),
+            'incubating_families': incubating,
+        }
+        if deferred_objective:
+            strategy_summary['deferred_tactical_next_task'] = deferred_objective
+        task['strategy'] = strategy_summary
     plan = {'schema': 'lemvo-context-plan', 'schema_version': VERSION,
             'turn_id': td.name, 'session_action': action, 'reason': reason,
             'previous_sid': current_sid or None, 'engine': engine,
             'phase': phase, 'branch': branch, 'policy': p,
             'adopted_session': reason == 'adopt-existing-session',
+            'macro_review_triggered': macro_review_active,
+            'macro_review_exp_count': strategy.get('completed_experiments', 0) if strategy else 0,
             'files': refs, 'created_utc': now(), 'created_epoch': time.time()}
     parts = [
         'WORK UNIT (runtime dispatch, not a scientific admission gate):\n' + json.dumps(task, ensure_ascii=False),
@@ -462,6 +541,17 @@ def prepare(td, source, target, engine='codex', session_file='.autoloop-session-
                  'metrics (only actually observed values with their conditions), and next_task {kind, objective}. '
                  'Partial/waiting work is valid. Missing JSON is compatible and does not stop the campaign. '
                  'Do not copy raw training logs into chat; keep full logs on disk and return changed metrics or a necessary error excerpt plus paths.' % (td/'work-result.json'))
+    if has_strategy_data and smod is not None:
+        if macro_review_active:
+            parts.append(
+                'MACRO REVIEW GATE TRIGGERED (incremental_streak=%d/%d): '
+                'Tactical next_task deferred (%s). Conduct Error-Driven First-Principles diagnosis and T2/T3 synthesis per macro-strategy.md.' % (
+                    strategy.get('incremental_streak', 0),
+                    strategy.get('macro_review_threshold', 0),
+                    str(deferred_objective or '')[:300],
+                )
+            )
+        parts.append(smod.render_ledger_text(strategy))
     if os.environ.get('LEMVO_MESSAGE_KIND') == 'user':
         parts.append('NEW CURRENT GUIDANCE: the preserved input below takes priority over the suggested objective/previous next_task. '
                      'Apply it to current work without reviving superseded tasks or inventing extra resource permission.')
@@ -515,6 +605,9 @@ def clean_result(obj, td, rc):
     nxt = obj.get('next_task')
     if isinstance(nxt, dict) and nxt.get('objective'):
         r['next_task'] = {k: nxt[k] for k in ('kind', 'objective', 'method_branch') if k in nxt}
+    for opt_k in ('intervention_tier', 'family_id'):
+        if obj.get(opt_k):
+            r[opt_k] = obj[opt_k]
     return r
 
 
@@ -682,16 +775,27 @@ def settle(td, rc=0, session_file='.autoloop-session-id'):
                 atomic(LAST_RESULT, result)
         atomic(td/'work-settlement.json', {'successful': True, 'turn_id': td.name,
                                         'recorded_utc': now()})
+        if plan.get('macro_review_triggered'):
+            smod = _load_strategy_module()
+            if smod is not None:
+                try:
+                    smod.mark_macro_review(Path('.'), td.name, plan.get('macro_review_exp_count'))
+                except Exception:
+                    pass
     return result
 
 
 def report(td, status, summary, next_objective=None, next_kind=None, artifacts=None,
-           metrics_file=None, evidence_scope=None):
+           metrics_file=None, evidence_scope=None, tier=None, family=None):
     td = Path(td)
     obj = {'status': status, 'summary': summary, 'artifact_refs': artifacts or [],
            'metrics': load(metrics_file, []) if metrics_file else []}
     if evidence_scope:
         obj['evidence_scope'] = evidence_scope
+    if tier:
+        obj['intervention_tier'] = tier
+    if family:
+        obj['family_id'] = family
     if next_objective:
         obj['next_task'] = {'kind': next_kind or 'research', 'objective': next_objective}
     result = clean_result(obj, td, 0)
@@ -714,6 +818,8 @@ def main(argv=None):
     p.add_argument('--summary', required=True); p.add_argument('--next', dest='next_objective')
     p.add_argument('--next-kind'); p.add_argument('--artifact', action='append', default=[])
     p.add_argument('--metrics-file'); p.add_argument('--evidence-scope')
+    p.add_argument('--tier', choices=('T0', 'T1', 'T2', 'T3'))
+    p.add_argument('--family')
     a = parser.parse_args(argv)
     if a.command == 'prepare':
         prepare(a.turn_dir, a.input, a.output, a.engine, a.session_file)
@@ -723,7 +829,7 @@ def main(argv=None):
         print('WORK_RESULT=%s status=%s' % (Path(a.turn_dir)/'work-result.json', result['status']))
     elif a.command == 'report':
         report(a.turn_dir, a.status, a.summary, a.next_objective, a.next_kind, a.artifact,
-               a.metrics_file, a.evidence_scope)
+               a.metrics_file, a.evidence_scope, tier=a.tier, family=a.family)
         print('WORK_RESULT=' + str(Path(a.turn_dir)/'work-result.json'))
     else:
         parser.print_help()

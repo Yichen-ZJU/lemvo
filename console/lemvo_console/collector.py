@@ -183,6 +183,37 @@ def read_idle_state(project):
     }
 
 
+def read_strategy_state(project):
+    state = load(project / '.lemvo-strategy-state.json', None)
+    portfolio = load(project / '.lemvo-portfolio.json', None)
+    snap = None
+    turns_dir = project / 'turns'
+    if turns_dir.is_dir():
+        snaps = sorted(turns_dir.glob('*/strategy-snapshot.json'), key=lambda q: q.parent.name, reverse=True)
+        for cand in snaps[:3]:
+            loaded = load(cand, None)
+            if isinstance(loaded, dict):
+                snap = loaded
+                break
+    state = state if isinstance(state, dict) else {}
+    snap = snap if isinstance(snap, dict) else {}
+    portfolio = portfolio if isinstance(portfolio, dict) else snap.get('portfolio')
+    fams = snap.get('families') if isinstance(snap.get('families'), dict) else {}
+    saturated = sorted(fid for fid, fd in fams.items() if isinstance(fd, dict) and fd.get('status') in ('SATURATED', 'CLOSED'))
+    dups = snap.get('duplicate_warnings') if isinstance(snap.get('duplicate_warnings'), list) else []
+    armed = snap.get('macro_review_armed') if 'macro_review_armed' in snap else bool(state.get('macro_review_armed'))
+    streak = snap.get('incremental_streak', state.get('incremental_streak', 0))
+    tiers = snap.get('tier_counts', state.get('tier_counts', {}))
+    return {
+        'incremental_streak': int(streak) if isinstance(streak, int) else 0,
+        'macro_review_armed': bool(armed),
+        'tier_counts': tiers if isinstance(tiers, dict) else {},
+        'saturated_families': saturated,
+        'portfolio': portfolio if isinstance(portfolio, dict) else {},
+        'duplicate_warnings_count': len(dups),
+    }
+
+
 def project_info(project, processes):
     p = Path(project)
     owner_pid = read_text(p / '.lemvo-owner.lock/pid', 64).strip()
@@ -198,6 +229,7 @@ def project_info(project, processes):
             'owner_start': owner_start, 'managed': (p / '.lemvo-mode').exists(),
             'jobs': [], 'jobs_source': 'live' if (p / '.lemvo-jobs.json').exists() else 'none',
             'idle_state': read_idle_state(p), 'pending_receipts': pending_receipt_count(p),
+            'strategy': read_strategy_state(p),
             'warning': None,
             'pending_guidance': len(list((p / '.lemvo-steer-queue').glob('q-*.md'))) }
 

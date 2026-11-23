@@ -1,6 +1,6 @@
 # Experiment Loop Contract (single source of truth)
 
-Version: 2.2 · 2026-10-13 (r29 A4/A6/A7: comparison basis, failure classification, min_delta semantics)
+Version: 2.3 · 2026-11-24 (v2.3 adds §8 Intervention Tiers T0-T3, Noise-Band Separation & Incubation Protection; retains r29 A4/A6/A7)
 Owner: `experiment-forge` generates task packages; `autoresearch` executes
 the loop. **优先级范围**：本契约只对**包内技术约定**（results.tsv schema、
 日志命名、局部循环规则、crash/guard/min_delta 协议）是单一来源——这些与
@@ -51,8 +51,8 @@ Columns:
 7. `status` — `keep` / `discard` / `crash` / `timeout` / `metric-error` / `no-op` / `blocked`
    （r29 A6 分类：`crash` = 进程失败退出；`timeout` = 超过 kill 阈值的执行中断，非科学否证；`metric-error` = 进程正常退出但指标解析失败（输出格式与 grep 模式不匹配等），修适配不改评判。三者都不写入占位成绩，也不自动升级为方向切换）
 8. `move` — strategy-table move: `follow` / `reverse` / `switch` /
-   `escalate` / `simplify` / `baseline`
-9. `description` — short, no TABs, no commas-in-place-of-TABs
+   `escalate` / `incubate` / `leap` / `simplify` / `baseline`
+9. `description` — short, no TABs, no commas-in-place-of-TABs (recommended prefix `[T0]`/`[T1]`/`[T2]`/`[T3]` and `[family=<id>]` when logging)
 
 `results.tsv` is **never committed** (leave untracked).
 
@@ -62,7 +62,7 @@ Columns:
   50+ or a value agreed up front) **and/or** a wall-clock `timeout`.
 - "LOOP FOREVER" / "NEVER STOP" means *do not pause to ask the human
   whether to continue* — it does NOT override maxIterations/timeout.
-- Stagnation rule (10 iterations without keep) per autoresearch SKILL.
+- Stagnation rule per autoresearch SKILL §4.10 (with macro plateau separation per §8).
 
 ## 3. Run logs (per iteration per phase, never overwritten)
 
@@ -140,3 +140,10 @@ Columns:
 - The revert chain must only ever touch experiment commits. User
   work-in-progress is snapshotted as its own commit BEFORE iteration 0
   (see autoresearch Step 0), so reverting can never swallow it.
+
+## 8. Intervention Tiers, Noise-Band Separation & Incubation Protection (v2.3)
+
+- **干预层级（T0–T3）**：在 `autoresearch.jsonl` / `logs/experiments.jsonl` 显式记录 `intervention_tier`（`T0` 复现/倍步、`T1` 参数/权重/正则小调、`T2` 新机制/新数据或推理结构、`T3` 架构或范式重构）与 `family_id`；`results.tsv` 第 8 列 `move` 支持 `incubate` 与 `leap`。
+- **小正信号保留 ≠ 重置平台期**：按 §6 保留噪声带内的同向小正信号（r29 A7），但其 **不重置** `T0/T1` 增量平台期计数；连续 `T0`/`T1` 未突破噪声带（或未见置信区间排除 0 的跃升）达到策略阈值时，必须触发错例根因分析 + `escalate`/`leap`，而不是无休止拧参数。
+- **新机制成长期保护（Incubation）**：标记 `move=incubate` / `leap` 的新 `T2`/`T3` 机制前 2–3 轮享有保护期（可在独立探索分支/槽位演进）：首版粗糙实现若低于精调老 champion 但工程可运行且诊断信号朝目标改善，不得在首次跑分即永久淘汰整个方法家族。
+- **禁止配置重跑浪费**：提交昂贵实验前先跑 `research-strategy.py check-dup`，确认与历史有效配置不重复后再启动。

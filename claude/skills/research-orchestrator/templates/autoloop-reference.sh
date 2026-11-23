@@ -1378,8 +1378,8 @@ else
 - 计划阶段/版本：stage=$PL_STAGE plan_version=$PL_VER（缺 research_plan 区=旧项目，照常运行）
 - 约束治理：修订任何 research_plan 约束 = version+1 + research-log.md 写 plan-change（触发/调整哪条/权限依据/旧证据保留范围/下一实验/成本止损/是否需批准）；规则全文见 research-orchestrator 的 constraint-governance.md
 - 上次有效进展：$(grep 'last_informative_observation' "$STATE" 2>/dev/null | cut -d: -f2-)
-- 下一最小 probe：$(grep 'next_min_probe' "$STATE" 2>/dev/null | cut -d: -f2-)
-按 READY_TO_PROBE 判据推进；不满足则写 ready_blocker（含解除条件），不做泛化审计。
+- 下一步构造动作：$(grep -E 'next_constructive_experiment|next_min_probe' "$STATE" 2>/dev/null | head -n 1 | cut -d: -f2-)
+按当前方法路线与策略台账（RESEARCH STRATEGY LEDGER）推进：工程冒烟从简验证，科学迭代优先推进有机制/结构区分度的 T2/T3 改动，不陷在同家族 T1 微调里空转；确实缺少执行前提才写 ready_blocker（含解除条件），不做泛化审计。
 MSG
   fi
   MSG_SOURCE="$OWN_SUMMARY"; MSG_OWNED=yes

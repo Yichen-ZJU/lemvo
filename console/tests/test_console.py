@@ -363,6 +363,32 @@ class ControlsTests(BaseFixture):
         self.assertEqual(proj['jobs'][0]['status'], 'succeeded')
         self.assertTrue(proj['jobs'][0]['already_harvested'])
 
+    def test_strategy_state_and_macro_review_visibility(self):
+        self.store.register(self.project)
+        atomic(self.project / '.lemvo-strategy-state.json', {
+            'incremental_streak': 6, 'macro_review_armed': True,
+            'tier_counts': {'T0': 2, 'T1': 5, 'T2': 0, 'T3': 0},
+        })
+        atomic(self.project / '.lemvo-portfolio.json', {
+            'slots': {'explore': {'family': 'latent_ctrl', 'tier': 'T3', 'status': 'active'}}
+        })
+        (self.project / 'turns/t2').mkdir(parents=True, exist_ok=True)
+        atomic(self.project / 'turns/t2/strategy-snapshot.json', {
+            'incremental_streak': 6, 'macro_review_armed': True,
+            'tier_counts': {'T0': 2, 'T1': 5, 'T2': 0, 'T3': 0},
+            'families': {'sft_tweak': {'status': 'SATURATED'}},
+            'duplicate_warnings': [{'exp_id': 'r2', 'matched_exp_id': 'r1'}],
+        })
+        collector = Collector(self.store, self.home)
+        with patch.object(collector.processes, 'scan', return_value=None), patch('lemvo_console.collector.tmux_panes', return_value={}), patch.object(collector, 'hardware', return_value={}):
+            s = collector.collect()
+        strat = s['projects'][0]['strategy']
+        self.assertEqual(strat['incremental_streak'], 6)
+        self.assertTrue(strat['macro_review_armed'])
+        self.assertEqual(strat['saturated_families'], ['sft_tweak'])
+        self.assertEqual(strat['duplicate_warnings_count'], 1)
+        self.assertEqual(strat['portfolio']['slots']['explore']['family'], 'latent_ctrl')
+
 
 if __name__=='__main__':
     unittest.main(verbosity=2)

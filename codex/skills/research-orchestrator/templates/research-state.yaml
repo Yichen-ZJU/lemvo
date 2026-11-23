@@ -149,3 +149,10 @@ workspace:
   experiments_dir: "experiments/"
   to_human_dir: "to_human/"
   paper_dir: "paper/"
+# 策略层级与抗增量配置（Lemvo v2 可选区；旧项目缺本节仍照常由 logs/experiments.jsonl 推断）
+# strategy:
+#   direction: maximize             # maximize | minimize（严禁 higher|lower）
+#   noise_band: null                # 已知随机种子噪声带宽度（如 0.02）；null 表示未显式设置
+#   macro_review_threshold: 5       # 连续 N 轮未破噪声带 T0/T1 后强制 OUTER_MACRO_REVIEW；0 表示禁用
+#   incubation_budget: 3            # 新 T2/T3 机制家族的成长期保护轮数
+#   family_saturation_runs: 4       # 家族饱和判定窗口

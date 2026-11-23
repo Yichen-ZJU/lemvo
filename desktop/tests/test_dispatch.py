@@ -166,6 +166,20 @@ class BridgeTests(unittest.TestCase):
         self.assertIn(str(self.project), r['stdout'])
         self.assertEqual((self.project / 'observation.txt').read_text(), 'sample')
 
+    def test_macro_review_and_streak_exposed_in_status(self):
+        st0 = self.p.rpc({'op': 'status'})
+        self.assertIsNone(st0['macro_review_armed'])
+        self.assertIsNone(st0['incremental_streak'])
+        bridge.atomic(self.project / '.lemvo-strategy-state.json', {'macro_review_armed': True, 'incremental_streak': 5})
+        st1 = self.p.rpc({'op': 'status'})
+        self.assertTrue(st1['macro_review_armed'])
+        self.assertEqual(st1['incremental_streak'], 5)
+        (self.project / 'turns/t9').mkdir(parents=True, exist_ok=True)
+        bridge.atomic(self.project / 'turns/t9/strategy-snapshot.json', {'macro_review_armed': False, 'incremental_streak': 0})
+        st2 = self.p.rpc({'op': 'status'})
+        self.assertFalse(st2['macro_review_armed'])
+        self.assertEqual(st2['incremental_streak'], 0)
+
     def test_cli_usage_error_does_not_become_budget_stop(self):
         c=self.p.config();c['provider']=c['requested_provider']='server'
         c['server_command']=[sys.executable,'-c','import sys;sys.exit(2)']

@@ -563,7 +563,7 @@ except Exception: print("");print("")' "$EJ" 2>/dev/null)
   done
   if [ "$WRITERS_ALIVE" -ne 0 ]; then echo "Runtime writer still alive; reset fenced but evidence not moved."; exit 1; fi
   mkdir -p "$ARC"
-  for X in turns .lemvo-context.json .lemvo-last-work-result.json .lemvo-idle-state.json .lemvo-recovery.sqlite3 .lemvo-receipts .autoloop-session-id .autoloop-summary.md \
+  for X in turns .lemvo-context.json .lemvo-last-work-result.json .lemvo-idle-state.json .lemvo-strategy-state.json .lemvo-recovery.sqlite3 .lemvo-receipts .autoloop-session-id .autoloop-summary.md \
            .autoloop-stall-count .autoloop-poison-count .autoloop-turn-active .autoloop-engine.pid; do
     [ -e "$X" ] && mv "$X" "$ARC/"
   done

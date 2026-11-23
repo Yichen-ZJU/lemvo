@@ -34,6 +34,7 @@ TESTS=(
   tests/execution_owner_lock_test.py
   tests/native_event_runtime_test.py
   tests/runtime_idle_settlement_test.py
+  tests/research_strategy_test.py
 )
 for opt in tests/arbor_construction_test.py tests/pro_context_test.py tests/team_classification_test.py tests/gpu_pool_test.py; do
   [ -f "$opt" ] && TESTS+=("$opt")

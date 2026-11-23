@@ -138,6 +138,22 @@ class Project:
         continuation = 'completed' if completed else 'paused' if stopped else 'running' if controller['bridge_aware'] else 'not_started' if not c.get('started') else 'controller_missing'
         idle_doc = read(self.project / '.lemvo-idle-state.json')
         idle_armed = bool(idle_doc.get('armed')) if isinstance(idle_doc, dict) else None
+        strat_doc = read(self.project / '.lemvo-strategy-state.json')
+        strat_snap = None
+        if (self.project / 'turns').is_dir():
+            for sf in sorted((self.project / 'turns').glob('*/strategy-snapshot.json'), key=lambda q: q.parent.name, reverse=True)[:3]:
+                sd = read(sf)
+                if isinstance(sd, dict):
+                    strat_snap = sd
+                    break
+        macro_review_armed = None
+        incremental_streak = None
+        if isinstance(strat_snap, dict):
+            macro_review_armed = bool(strat_snap.get('macro_review_armed'))
+            incremental_streak = strat_snap.get('incremental_streak')
+        elif isinstance(strat_doc, dict):
+            macro_review_armed = bool(strat_doc.get('macro_review_armed'))
+            incremental_streak = strat_doc.get('incremental_streak')
         receipts_dir = self.project / '.lemvo-receipts'
         pending_receipts = sum(1 for fn in receipts_dir.glob('*.json') if isinstance(read(fn), dict) and not read(fn).get('consumed')) if receipts_dir.is_dir() else 0
         return {'project': str(self.project), 'project_id': c['project_id'], 'provider': c['provider'],
@@ -147,6 +163,7 @@ class Project:
                 'worker_seen': c.get('worker_seen'), 'worker_id': c.get('worker_id'),
                 'runtime_status': runtime_status, 'controller': controller, 'continuation': continuation,
                 'idle_armed': idle_armed, 'pending_receipts': pending_receipts,
+                'macro_review_armed': macro_review_armed, 'incremental_streak': incremental_streak,
                 'mode': (self.project / '.lemvo-mode').read_text().strip() if (self.project / '.lemvo-mode').exists() else None}
 
     def owned_request(self, data):

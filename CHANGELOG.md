@@ -1,5 +1,12 @@
 # 2026-11-10 — Neighbor mechanisms in method generation
 
+## 2026-11-24 — Lemvo v2 Strategy Engine, Intervention Tiers, Hard Macro-Review & Anti-Incrementalism
+
+- Added `skills/research-orchestrator/templates/research-strategy.py` across all 4 distribution trees: tracks intervention tiers (`T0` replicate/compute scaling, `T1` hyperparameter/weight/coef tweaks, `T2` new objective/data/inference mechanisms, `T3` architecture/representation leaps), separates noise-band perturbations from true breakthroughs (retaining `r29 A7` small signals without resetting stagnation), checks duplicate config fingerprints (`check-dup`), tracks orthogonal `exploit`/`explore` portfolio slots with `INCUBATING` protection, and persists `logs/failure-taxonomy.jsonl`.
+- Integrated `research-strategy.py` into `work-unit.py` (`prepare` injects `RESEARCH STRATEGY LEDGER`, arms `kind=macro_review` fresh sessions when `incremental_streak >= macro_review_threshold` while respecting user guidance, waiting jobs, and active runs; `settle` marks one-shot completion via `mark_macro_review`; `report` supports `--tier`/`--family`), `lemvo-run.sh purge` (archives `.lemvo-strategy-state.json` safely), and `autoloop-reference.sh` (removes minimal-probe incremental framing from cold-start prompt recovery).
+- Modularized `skills/research-orchestrator/SKILL.md` (>55% leaner per-turn prompt footprint) with `references/macro-strategy.md` and `references/verdict-and-gates.md`, upgraded `experiment-forge/references/contract.md` (`v2.3`), `skills/autoresearch/SKILL.md` (`incubate`/`leap` moves), `skills/experiment-forge/SKILL.md`, `templates/research-state.yaml`, and Pro `autoscientist/system/templates/ROLE-ANALYST.md` while preserving all `r29` gates and `results.tsv` schema.
+- Upgraded `console/` (`collector.py`), `desktop/` (`remote_codex_bridge.py`), and `scripts/check-runtime-drift.py` (Python 3.6 compatible, 12 canonical templates + 5 shared skill/contract docs), plus `tests/research_strategy_test.py` and `tests/installer_test.sh` across all 4 trees.
+
 ## 2026-11-23 — Idle settlement, job-event hardening, cross-tree parity and companion observability
 
 - Upstreamed `runtime-idle.py` and settlement ordering (`capture-worker` -> `settle` -> `recovery-mark`) across all 4 distribution trees, gating `--auto-wake` strictly on `armed == True` so `WAITING_RESOURCE` steer wakes preserve `user-steer` semantics.
