@@ -27,6 +27,9 @@ mkdir -p "$FH/$CFG/skills/pre-skill" "$FH/$CFG/$INJECT"
 echo "pre-original" > "$FH/$CFG/skills/pre-skill/SKILL.md"
 run_install $FH $FH/bin:/usr/bin:/bin > /dev/null 2>&1
 [ -d "$FH/$CFG/skills/intro-drafter" ] || { bad "A: baseline install"; exit 1; }
+for tpl in lemvo-run.sh autoloop-reference.sh runtime-idle.py job-events.py work-unit.py; do
+  [ -f "$FH/$CFG/skills/research-orchestrator/templates/$tpl" ] || { bad "A: missing template $tpl"; exit 1; }
+done
 chmod a-w "$FH/$CFG/$INJECT"
 run_install $FH $FH/bin:/usr/bin:/bin > "$LOGDIR/a.log" 2>&1
 chmod u+w "$FH/$CFG/$INJECT"

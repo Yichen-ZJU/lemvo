@@ -1,0 +1,9 @@
+.DS_Store
+*.bak
+*.swp
+*.key
+*.pem
+.env
+auth.json
+__pycache__/
+*.pyc

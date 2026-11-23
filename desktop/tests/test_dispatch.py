@@ -204,6 +204,25 @@ class BridgeTests(unittest.TestCase):
                 process.wait()
 
 
+    def test_status_recognizes_native_event_owner_and_idle_state(self):
+        lock = self.project / '.lemvo-owner.lock'
+        lock.mkdir(parents=True, exist_ok=True)
+        (lock / 'pid').write_text(str(os.getpid()))
+        (lock / 'starttime').write_text(str(bridge.identity(os.getpid())))
+        bridge.atomic(self.project / '.lemvo-idle-state.json', {'armed': True, 'reason': 'structured-waiting'})
+        bridge.atomic(self.project / '.lemvo-receipts/r1.json', {'run_id': 'r1', 'consumed': False})
+        orig_read_bytes = Path.read_bytes
+        def fake_read_bytes(p):
+            if str(p) == '/proc/%s/cmdline' % os.getpid():
+                return b'python3\x00native-event-owner.py\x00'
+            return orig_read_bytes(p)
+        with mock.patch.object(Path, 'read_bytes', fake_read_bytes):
+            st = self.p.rpc({'op': 'status'})
+        self.assertTrue(st['controller']['alive'])
+        self.assertTrue(st['idle_armed'])
+        self.assertEqual(st['pending_receipts'], 1)
+
+
 class ClientTests(unittest.TestCase):
     def test_claim_response_loss_recovers_before_launch_intent(self):
         with tempfile.TemporaryDirectory() as tmp:

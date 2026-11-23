@@ -149,20 +149,41 @@ def marker(path, job, running):
             'fingerprint': hashlib.sha256(json.dumps(obj, sort_keys=True, ensure_ascii=False).encode()).hexdigest()}
 
 
+def _first_path(job, keys):
+    for k in keys:
+        v = job.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return None
+
+
 def classify(job, now=None):
     now = time.time() if now is None else now
     external = bool(job.get('external_coordinator'))
     running = bool(job.get('pid') and not external and alive(job))
+    if not running and not external and job.get('resume_pid'):
+        if alive({'pid': job['resume_pid'], 'pid_start': job.get('resume_pid_start')}):
+            running = True
+    done_path = _first_path(job, ('done_file', 'done_path', 'result_path',
+                                  'result_file', 'terminal_receipt', 'wait_file'))
+    failed_path = _first_path(job, ('failed_file', 'failed_path'))
+    raw_status = str(job.get('status', '')).lower()
+    harvested = (not running) and bool(
+        job.get('harvested') is True
+        or job.get('harvest_summary') is not None
+        or job.get('harvest_cycle') is not None
+    )
     row = {k: job.get(k) for k in ('name', 'run_id', 'pid', 'pid_start')}
-    row.update(done_file=job.get('done_file') or job.get('wait_file'),
-               external=external, producer_alive=running)
+    row.update(done_file=done_path, external=external, producer_alive=running)
+    if harvested:
+        row['already_harvested'] = True
     observed = None
-    if job.get('failed_file'):
-        failed = marker(job['failed_file'], job, running)
+    if failed_path:
+        failed = marker(failed_path, job, running)
         if failed and failed['state'] not in ('old-marker', 'incomplete', 'stale', 'unknown'):
             observed = failed
             observed['state'] = 'failed'
-            row['failed_file'] = job['failed_file']
+            row['failed_file'] = failed_path
     if observed is None:
         observed = marker(row['done_file'], job, running)
     if observed:
@@ -173,12 +194,24 @@ def classify(job, now=None):
             state = 'stale'
         elif state == 'incomplete':
             state = 'failed' if job.get('pid') and not external else 'unknown'
+        if harvested and state in ('unknown', 'stale', 'old-marker') and raw_status in ('succeeded', 'success', 'ok', 'complete', 'completed'):
+            state = 'succeeded'
+        elif harvested and state in ('unknown', 'stale', 'old-marker') and raw_status in ('failed', 'error'):
+            state = 'failed'
         row.update({k: v for k, v in observed.items() if k not in ('state',)})
         row['status'] = state
     elif running:
         row['status'] = 'running'
     elif job.get('pid') and not external:
         row['status'] = 'ended'
+    elif harvested and raw_status in ('succeeded', 'success', 'ok', 'complete', 'completed'):
+        row['status'] = 'succeeded'
+    elif harvested and raw_status in ('failed', 'error'):
+        row['status'] = 'failed'
+    elif harvested and raw_status in ('timed_out', 'ended', 'stale'):
+        row['status'] = raw_status
+    elif harvested:
+        row['status'] = 'succeeded'
     elif external:
         row['status'] = 'unknown'
     else:
@@ -215,7 +248,7 @@ def publish(rows, directory):
     directory.mkdir(parents=True, exist_ok=True)
     with locked(directory / '.events.lock'):
         for row in rows:
-            if row['status'] == 'running':
+            if row['status'] == 'running' or row.get('already_harvested'):
                 continue
             key = event_key(row)
             p = directory / ('job-event-' + key + '.json')
@@ -247,7 +280,28 @@ def pending(directory):
     return False
 
 
-def reconcile(jobs_file, states_file, receipts):
+def stamp_started(jobs_file):
+    p = Path(jobs_file)
+    if not p.exists():
+        return False
+    with locked(p.parent / '.jobs.lock'):
+        jobs = load(p, None)
+        if not isinstance(jobs, list):
+            return False
+        changed = False
+        now = time.time()
+        for j in jobs:
+            if isinstance(j, dict) and not j.get('started_epoch'):
+                j['started_epoch'] = now
+                changed = True
+        if changed:
+            atomic(p, jobs)
+        return changed
+
+
+def reconcile(jobs_file, states_file, receipts, stamp_started_flag=False):
+    if stamp_started_flag:
+        stamp_started(jobs_file)
     p = Path(jobs_file)
     if p.exists():
         jobs = load(p, None)
@@ -291,15 +345,20 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest='command')
     p = sub.add_parser('reconcile')
+    p.add_argument('--stamp-started', action='store_true')
     p.add_argument('jobs'); p.add_argument('states'); p.add_argument('receipts')
     p = sub.add_parser('publish')
     p.add_argument('states'); p.add_argument('receipts')
+    p = sub.add_parser('stamp-started')
+    p.add_argument('jobs')
     args = parser.parse_args()
     if args.command == 'reconcile':
-        print(reconcile(args.jobs, args.states, args.receipts))
+        print(reconcile(args.jobs, args.states, args.receipts, stamp_started_flag=args.stamp_started))
     elif args.command == 'publish':
         rows = load(args.states, [])
         publish(rows if isinstance(rows, list) else [], args.receipts)
+    elif args.command == 'stamp-started':
+        stamp_started(args.jobs)
     else:
         parser.print_help()
 

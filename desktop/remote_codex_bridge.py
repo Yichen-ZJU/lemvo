@@ -116,7 +116,8 @@ class Project:
         try:
             pid = int((lock / 'pid').read_text().strip())
             start = (lock / 'starttime').read_text().strip()
-            alive = bool(start and identity(pid) == start and b'lemvo-run' in Path('/proc/%s/cmdline' % pid).read_bytes())
+            cmdline = Path('/proc/%s/cmdline' % pid).read_bytes()
+            alive = bool(start and identity(pid) == start and (b'lemvo-run' in cmdline or b'native-event-owner' in cmdline))
             aware = alive and c.get('controller_pids', {}).get(str(pid)) == start
             if alive and not aware:
                 # `switch unattended` can spawn through the existing runtime.
@@ -135,12 +136,17 @@ class Project:
         completed = (self.project / 'CAMPAIGN-DONE').exists() or state == 'COMPLETED'
         stopped = state in ('PAUSED', 'BLOCKED', 'STALLED') or any((self.project / n).exists() for n in ('STOP', 'HOLD', 'BLOCKED-USER'))
         continuation = 'completed' if completed else 'paused' if stopped else 'running' if controller['bridge_aware'] else 'not_started' if not c.get('started') else 'controller_missing'
+        idle_doc = read(self.project / '.lemvo-idle-state.json')
+        idle_armed = bool(idle_doc.get('armed')) if isinstance(idle_doc, dict) else None
+        receipts_dir = self.project / '.lemvo-receipts'
+        pending_receipts = sum(1 for fn in receipts_dir.glob('*.json') if isinstance(read(fn), dict) and not read(fn).get('consumed')) if receipts_dir.is_dir() else 0
         return {'project': str(self.project), 'project_id': c['project_id'], 'provider': c['provider'],
                 'requested_provider': c['requested_provider'], 'busy': busy,
                 'server_approval': c.get('server_approval','preserve'),
                 'active': a if busy else None, 'request': request,
                 'worker_seen': c.get('worker_seen'), 'worker_id': c.get('worker_id'),
                 'runtime_status': runtime_status, 'controller': controller, 'continuation': continuation,
+                'idle_armed': idle_armed, 'pending_receipts': pending_receipts,
                 'mode': (self.project / '.lemvo-mode').read_text().strip() if (self.project / '.lemvo-mode').exists() else None}
 
     def owned_request(self, data):

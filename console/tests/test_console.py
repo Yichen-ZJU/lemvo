@@ -337,6 +337,32 @@ class ControlsTests(BaseFixture):
         self.assertEqual(len(list((self.project/'.lemvo-steer-queue').glob('q-*.md'))),1)
         self.assertFalse((self.project/'.lemvo-advance-request').exists())
 
+    def test_idle_state_receipts_done_path_and_pending_snapshot_visibility(self):
+        self.store.register(self.project)
+        atomic(self.project / '.lemvo-idle-state.json', {
+            'armed': True, 'reason': 'structured-waiting', 'turn_id': 't1',
+            'has_declared_wait': False, 'declared_wait_condition': {'reason': '', 'identity': 'unspecified'},
+        })
+        atomic(self.project / '.lemvo-receipts/r1.json', {'run_id': 'fit-1', 'consumed': False})
+        atomic(self.project / '.lemvo-receipts/r2.json', {'run_id': 'fit-0', 'consumed': True})
+        result = self.project / 'sub/result.json'
+        atomic(result, {'run_id': 'fit-1', 'status': 'succeeded', 'exit_code': 0})
+        snap = self.project / '.lemvo-jobs.json.pending-receipt-1700000000'
+        atomic(snap, [{'run_id': 'fit-1', 'pid': 111, 'pid_start': '12', 'done_path': 'sub/result.json', 'harvest_summary': 'ok'}])
+        collector = Collector(self.store, self.home)
+        collector.processes.items = {999: {'pid': 999, 'ppid': 1, 'start': '55', 'state': 'S', 'cwd': str(self.project), 'args': ['python3', 'native-event-owner.py']}}
+        atomic(self.project / '.lemvo-owner.lock/pid', '999')
+        atomic(self.project / '.lemvo-owner.lock/starttime', '55')
+        with patch.object(collector.processes, 'scan', return_value=None), patch('lemvo_console.collector.tmux_panes', return_value={}), patch.object(collector, 'hardware', return_value={}):
+            s = collector.collect()
+        proj = s['projects'][0]
+        self.assertTrue(proj['owner_alive'])
+        self.assertEqual(proj['pending_receipts'], 1)
+        self.assertEqual(proj['jobs_source'], 'pending-receipt-snapshot')
+        self.assertTrue(proj['idle_state']['armed'])
+        self.assertEqual(proj['jobs'][0]['status'], 'succeeded')
+        self.assertTrue(proj['jobs'][0]['already_harvested'])
+
 
 if __name__=='__main__':
     unittest.main(verbosity=2)

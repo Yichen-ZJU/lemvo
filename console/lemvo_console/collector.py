@@ -158,19 +158,47 @@ def scalar_status(project):
     return text.split('|', 1)[0].upper(), text
 
 
+def pending_receipt_count(project):
+    receipts_dir = project / '.lemvo-receipts'
+    if not receipts_dir.is_dir():
+        return 0
+    count = 0
+    for fn in sorted(receipts_dir.glob('*.json')):
+        rec = load(fn, None)
+        if isinstance(rec, dict) and not rec.get('consumed'):
+            count += 1
+    return count
+
+
+def read_idle_state(project):
+    raw = load(project / '.lemvo-idle-state.json', None)
+    if not isinstance(raw, dict):
+        return None
+    return {
+        'armed': bool(raw.get('armed')),
+        'reason': raw.get('reason'),
+        'turn_id': raw.get('turn_id'),
+        'has_declared_wait': raw.get('has_declared_wait'),
+        'declared_wait_condition': raw.get('declared_wait_condition'),
+    }
+
+
 def project_info(project, processes):
     p = Path(project)
     owner_pid = read_text(p / '.lemvo-owner.lock/pid', 64).strip()
     owner_start = read_text(p / '.lemvo-owner.lock/starttime', 64).strip()
     owner = processes.same(owner_pid, owner_start)
     if owner:
-        owner = any('lemvo-run' in a for a in processes.items[int(owner_pid)]['args'])
+        args = processes.items[int(owner_pid)]['args']
+        owner = any(tag in a for a in args for tag in ('lemvo-run', 'native-event-owner'))
     st, text = scalar_status(p)
     return {'id': key(p), 'path': str(p), 'name': p.name, 'mode': read_text(p / '.lemvo-mode', 40).strip(),
             'status': st, 'status_detail': redact(text), 'owner_alive': owner,
             'owner_pid': int(owner_pid) if owner_pid.isdigit() else None,
             'owner_start': owner_start, 'managed': (p / '.lemvo-mode').exists(),
-            'jobs': [], 'warning': None,
+            'jobs': [], 'jobs_source': 'live' if (p / '.lemvo-jobs.json').exists() else 'none',
+            'idle_state': read_idle_state(p), 'pending_receipts': pending_receipt_count(p),
+            'warning': None,
             'pending_guidance': len(list((p / '.lemvo-steer-queue').glob('q-*.md'))) }
 
 
@@ -178,13 +206,18 @@ def describe_job(item, project, processes, previous, now, stall_seconds, state_d
     run_id = str(item.get('run_id', ''))
     pid, start = item.get('pid'), item.get('pid_start', item.get('starttime'))
     alive = processes.same(pid, start)
+    if not alive and item.get('resume_pid'):
+        alive = processes.same(item.get('resume_pid'), item.get('resume_pid_start'))
     identity_missing = bool(pid and not start)
     status = str(item.get('status', 'unknown')).lower()
     job = {'id': key(project, run_id, pid), 'run_id': run_id, 'pid': pid, 'pid_start': start,
            'session_id': item.get('session_id'), 'status': status, 'alive': alive,
+           'already_harvested': bool(item.get('harvested') is True or item.get('harvest_summary') is not None),
            'phase': 'unknown', 'detail': '', 'progress': None, 'last_progress_at': None,
            'health': 'unknown', 'log_tail': '', 'warning': None}
-    result_path = item.get('result_file', item.get('done_file'))
+    result_path = (item.get('result_file') or item.get('done_file')
+                   or item.get('done_path') or item.get('result_path')
+                   or item.get('terminal_receipt'))
     verified_terminal = False
     if result_path:
         result_path = Path(result_path)
@@ -387,6 +420,11 @@ class Collector:
         for project in sorted(projects):
             info = project_info(project, self.processes)
             jp = Path(project) / '.lemvo-jobs.json'
+            if not jp.exists():
+                snaps = sorted(Path(project).glob('.lemvo-jobs.json.pending-receipt-*'), key=lambda p: p.name, reverse=True)
+                if snaps:
+                    jp = snaps[0]
+                    info['jobs_source'] = 'pending-receipt-snapshot'
             jobs = load(jp, None) if jp.exists() else []
             if jp.exists() and (not isinstance(jobs, list) or any(not isinstance(j, dict) for j in jobs)):
                 info['warning'] = 'Job registry unreadable or malformed; no successful completion inferred'

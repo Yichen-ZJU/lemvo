@@ -40,9 +40,11 @@ SELF="$HERE/$(basename -- "$0")"
 RUNTIME_SUPPORT="$HERE/runtime-support.py"
 RUNTIME_CONTRACT="$HERE/runtime-contract.py"
 JOB_EVENTS="$HERE/job-events.py"
+RUNTIME_IDLE="$HERE/runtime-idle.py"
 [ -f "$RUNTIME_SUPPORT" ] || { echo "Missing runtime-support.py: install the complete research-orchestrator skill."; exit 64; }
 [ -f "$RUNTIME_CONTRACT" ] || { echo "Missing runtime-contract.py: install the complete runtime bundle."; exit 64; }
 [ -f "$JOB_EVENTS" ] || { echo "Missing job-events.py: install the complete runtime bundle."; exit 64; }
+[ -f "$RUNTIME_IDLE" ] || { echo "Missing runtime-idle.py: install the complete runtime bundle."; exit 64; }
 AUTOLOOP="${AUTOLOOP_SCRIPT:-$HERE/autoloop-reference.sh}"
 MODE_F=.lemvo-mode; ENGINE_F=.lemvo-engine; STATUS_F=.lemvo-status
 LOCKD=.lemvo-owner.lock; QUEUE=.lemvo-steer-queue; ARCHIVE=.lemvo-steer-archive
@@ -262,27 +264,16 @@ esac
 
 # ── C4：作业终态判定（六态；形状错=CORRUPT；result JSON 严格判定）──
 jobs_reconcile_once() {  # EVENTS: unconsumed branch terminal, even with live siblings.
-  python3 "$JOB_EVENTS" reconcile "$JOBS" .lemvo-jobstates.json "$RECEIPTS"
+  python3 "$JOB_EVENTS" reconcile --stamp-started "$JOBS" .lemvo-jobstates.json "$RECEIPTS"
 }
 stamp_jobs_started() {
-  python3 - "$JOBS" <<'PYJ2'
-import json, sys, time
-try:
-    jobs = json.load(open(sys.argv[1]))
-    ch = False
-    for j in jobs:
-        if not j.get("started_epoch"):
-            j["started_epoch"] = time.time(); ch = True
-    if ch: json.dump(jobs, open(sys.argv[1], "w"))
-except Exception: pass
-PYJ2
+  python3 "$JOB_EVENTS" stamp-started "$JOBS" >/dev/null 2>&1 || true
 }
 write_receipts() {  # Repeated all-terminal reconciliation must not duplicate events.
   python3 "$JOB_EVENTS" publish .lemvo-jobstates.json "$RECEIPTS"
 }
-consume_receipts_snapshot() {  # 未消费回执 → 合并消息路径；只取前 20 且只确认这 20
-  local f out
-  f=$(python3 - "$RECEIPTS" <<'PYC0'
+pending_receipt_paths() {  # Read only; also used to wake a settled idle worker.
+  python3 - "$RECEIPTS" <<'PYC0'
 import json, os, sys
 d = sys.argv[1]
 out = []
@@ -297,7 +288,10 @@ if os.path.isdir(d):
         if len(out) >= 20: break
 print("\n".join(out))
 PYC0
-)
+}
+consume_receipts_snapshot() {  # 未消费回执 → 合并消息路径；只取前 20 且只确认这 20
+  local f out
+  f=$(pending_receipt_paths)
   [ -z "$f" ] && return 1
   out=$(mktemp)
   echo "$f" > "$out.list"
@@ -357,7 +351,6 @@ steer_archive_consumed() {  # 仅归档本轮快照清单内的（轮中提交�
 
 # ── 对账门（返回 0=可推进；1=有活作业）──
 reconcile_gate() {
-  stamp_jobs_started
   ST=$(jobs_reconcile_once) || ST=CORRUPT
   case "$ST" in
     EVENTS) export LEMVO_RESOURCE_WAKE=job-terminal;;  # Preserve mixed live registrations.
@@ -394,6 +387,8 @@ recover_turns() {
       ack) :;;
       *) continue;;
     esac
+    # A failed state write leaves the successful turn pending for another CPU retry.
+    python3 "$RUNTIME_IDLE" settle "$td" >/dev/null || { rm -f "$plan"; return 1; }
     [ -f "$td/steer-published.list" ] && {
         python3 "$RUNTIME_SUPPORT" delivery delivered "$td/steer-published.list" "$(basename "$td")"
         steer_archive_consumed "$td/steer-published.list"
@@ -403,7 +398,7 @@ recover_turns() {
         steer_archive_consumed "$td/steer-superseded.list"
       }
     [ -f "$td/job-batch.list" ] && mark_receipts_consumed "$td/job-batch.list"
-    python3 "$RUNTIME_SUPPORT" recovery-mark "$td" settled confirmed
+    python3 "$RUNTIME_SUPPORT" recovery-mark "$td" settled confirmed || { rm -f "$plan"; return 1; }
   done < "$plan"
   rm -f "$plan"
   [ "$needs_more" -eq 0 ]
@@ -434,6 +429,8 @@ PYM
   python3 "$RUNTIME_SUPPORT" turn-register "$TD" || return 4
 }
 confirm_turn() {  # 本批成功后：归档 steer、确认回执、合并 job/steer 引用、settled
+  # Use the same order as recovery. Commit the wait before the settled marker.
+  python3 "$RUNTIME_IDLE" settle "$TD" >/dev/null || return 1
   [ -n "${MSG_FILE:-}" ] && python3 "$RUNTIME_SUPPORT" delivery delivered "$MSG_FILE.slist" "${TURN_ID:-}"
   [ -n "${MSG_FILE:-}" ] && { steer_archive_consumed "$MSG_FILE.slist"; mark_receipts_consumed "$MSG_FILE.rlist"; }
   if [ -n "${TD:-}" ] && [ -f "$TD/steer-superseded.list" ]; then
@@ -462,9 +459,7 @@ json.dump(r, open(tmp, "w"), indent=1)
 os.replace(tmp,target)
 PYC2
   fi
-  [ -n "${TD:-}" ] && [ -f "$TD/manifest.json" ] && \
-    python3 -c 'import json,sys; p=sys.argv[1]+"/manifest.json"; d=json.load(open(p)); d["status"]="settled"; json.dump(d, open(p,"w"), indent=1)' "$TD" 2>/dev/null
-  [ -n "${TD:-}" ] && python3 "$RUNTIME_SUPPORT" recovery-mark "$TD" settled confirmed
+  python3 "$RUNTIME_SUPPORT" recovery-mark "$TD" settled confirmed
 }
 
 # ── E1：共用 step —— 组装本批 steer+回执（advance 与主循环同一路径）──
@@ -568,7 +563,7 @@ except Exception: print("");print("")' "$EJ" 2>/dev/null)
   done
   if [ "$WRITERS_ALIVE" -ne 0 ]; then echo "Runtime writer still alive; reset fenced but evidence not moved."; exit 1; fi
   mkdir -p "$ARC"
-  for X in turns .lemvo-context.json .lemvo-last-work-result.json .lemvo-recovery.sqlite3 .lemvo-receipts .autoloop-session-id .autoloop-summary.md \
+  for X in turns .lemvo-context.json .lemvo-last-work-result.json .lemvo-idle-state.json .lemvo-recovery.sqlite3 .lemvo-receipts .autoloop-session-id .autoloop-summary.md \
            .autoloop-stall-count .autoloop-poison-count .autoloop-turn-active .autoloop-engine.pid; do
     [ -e "$X" ] && mv "$X" "$ARC/"
   done
@@ -607,7 +602,7 @@ if [ "$CMD" = "advance" ]; then
   begin_turn || exit 4
   assemble_step_message || { set_status "BLOCKED|instruction-contract"; exit 4; }
   dispatch_step; rc=$?
-  [ $rc -eq 0 ] && confirm_turn
+  if [ $rc -eq 0 ]; then confirm_turn || { set_status "BLOCKED|idle-contract"; exit 4; }; fi
   if [ $rc -eq 7 ]; then python3 "$RUNTIME_SUPPORT" preflight-close "$TD" WAITING_RESOURCE; python3 "$RUNTIME_SUPPORT" wait-register; fi
   exit $rc
 fi
@@ -688,7 +683,7 @@ wait_pause() {
 TURN=0; FAILS=0; PROTO_NOSID=0
 echo 0 > .lemvo-turn-count
 while :; do
-  unset LEMVO_RESOURCE_WAKE
+  unset LEMVO_RESOURCE_WAKE LEMVO_IDLE_DELIVERED_CONDITION
   # 模式与终态
   [ -f CAMPAIGN-DONE ] && { set_status "COMPLETED|campaign-done"; log "项目已完成——退出（不重开终态）"; exit 0; }
   TURN=$((TURN + 1))
@@ -702,7 +697,6 @@ while :; do
   fi
 
   # C5：每轮先对账（活作业与未消费回执优先，不先调模型）
-  stamp_jobs_started
   ST=$(jobs_reconcile_once) || ST=CORRUPT
   case "$ST" in
     EVENTS)
@@ -768,6 +762,28 @@ while :; do
     fi
   fi
 
+  # The worker has exited. Ordinary CPU code owns its wait until a real event.
+  # Do this BEFORE the legacy timed resource reassessment so a 900-second
+  # timer cannot reopen an unchanged, explicitly idle work unit.
+  IDLE_FILE=$(mktemp)
+  if [ -n "${LEMVO_RESOURCE_WAKE:-}" ]; then
+    python3 "$RUNTIME_IDLE" check-shell --wake "$LEMVO_RESOURCE_WAKE" > "$IDLE_FILE"
+  else
+    python3 "$RUNTIME_IDLE" check-shell --auto-wake > "$IDLE_FILE"
+  fi
+  IDLE_RC=$?
+  if [ "$IDLE_RC" -eq 3 ]; then rm -f "$IDLE_FILE"; set_status "BLOCKED|instruction-contract"; exit 4; fi
+  if [ "$IDLE_RC" -ne 0 ]; then rm -f "$IDLE_FILE"; set_status "BLOCKED|idle-contract"; exit 4; fi
+  . "$IDLE_FILE"; rm -f "$IDLE_FILE"
+  if [ "$IDLE_ACTION" = wait ]; then
+    set_status "WAITING_JOB|event-idle-no-model"
+    sleep "$POLL"; TURN=$((TURN - 1)); continue
+  fi
+  if [ -z "${LEMVO_RESOURCE_WAKE:-}" ] && [ "$IDLE_REASON" != not-armed ]; then
+    export LEMVO_RESOURCE_WAKE="$IDLE_REASON"
+    export LEMVO_IDLE_DELIVERED_CONDITION="$IDLE_CONDITION"
+  fi
+
   # Resource waiting is a polling state, not a permanent pre-dispatch veto.
   # No turn manifests or model calls are created for ordinary waiting ticks.
   if [ -z "${LEMVO_RESOURCE_WAKE:-}" ]; then
@@ -792,7 +808,7 @@ while :; do
        else
          PROTO_NOSID=0
        fi
-       confirm_turn;;
+       confirm_turn || { set_status "BLOCKED|idle-contract"; exit 4; };;
     2) if [ "$REASON" = STALL_NO_ARTIFACT ]; then
          set_status "STALLED|no-progress"; log "执行无进展——等待具体下一动作（不是科研否定）"
        else set_status "BLOCKED|budget-decision"; log "预算决策点——控制器停止等人"; fi

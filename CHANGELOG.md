@@ -1,5 +1,13 @@
 # 2026-11-10 — Neighbor mechanisms in method generation
 
+## 2026-11-23 — Idle settlement, job-event hardening, cross-tree parity and companion observability
+
+- Upstreamed `runtime-idle.py` and settlement ordering (`capture-worker` -> `settle` -> `recovery-mark`) across all 4 distribution trees, gating `--auto-wake` strictly on `armed == True` so `WAITING_RESOURCE` steer wakes preserve `user-steer` semantics.
+- Hardened `job-events.py` and `lemvo-run.sh`: support `done_path`/`failed_path`/`result_path`/`terminal_receipt` aliases, suppress phantom 900s `unknown` wakes on `already_harvested` entries and dead PIDs with live `resume_pid`, and make `stamp-started` atomic/locked and consolidated into `reconcile --stamp-started`.
+- Hardened `autoloop-reference.sh` and `work-unit.py`: fixed multi-line YAML quoted/block scalar parsing in `read_fields()`/`prep-snapshot`, added bounded `campaign_log.txt` rotation (`LEMVO_CAMPAIGN_LOG_MAX_BYTES`), and cached sibling module imports in `runtime-idle.py`/`work-unit.py`.
+- Fixed `codex-pro` `research-orchestrator/SKILL.md` schema drift (`metric_name`, `maximize|minimize`, `r29 B3` checks), split oversized `skills/deepspeed/SKILL.md` into `references/full-guide.md`, added `scripts/check-runtime-drift.py`, and updated `console/` and `desktop/` for `native-event-owner`, `idle_state`, `pending_receipts`, and rotated job snapshots.
+- Verification (CPU stubs/replays only; no real model or GPU benchmark claimed): 11/11 CPU idle-settlement replays/regressions passed (0 real model calls), `console/tests/acceptance.py` 9/9 passed, cross-repo drift check passed, and all 4 parallelized `tests/run_tests.sh` suites passed.
+
 ## 2026-11-17 — Event-driven experiment waiting and CLI continuity
 
 - Deliver each completed or failed experiment branch independently while preserving other live jobs; persist and deduplicate execution receipts across restarts.

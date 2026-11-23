@@ -71,6 +71,7 @@ HELPER_VERSION="4.14"
 RUNTIME_SUPPORT="$(cd "$(dirname "$0")" && pwd)/runtime-support.py"
 RUNTIME_CONTRACT="$(cd "$(dirname "$0")" && pwd)/runtime-contract.py"
 WORK_UNIT="$(cd "$(dirname "$0")" && pwd)/work-unit.py"
+RUNTIME_IDLE="$(dirname "$WORK_UNIT")/runtime-idle.py"
 SELF="$(cd "$(dirname "$0")" && pwd)/$(basename -- "$0")"
 [ -f "$RUNTIME_SUPPORT" ] || { echo "Missing runtime-support.py: install the complete research-orchestrator skill."; exit 64; }
 [ -f "$RUNTIME_CONTRACT" ] || { echo "Missing runtime-contract.py: install the complete runtime bundle."; exit 64; }
@@ -211,13 +212,47 @@ def unquote(val):
 def section_header(name):
     return re.compile(r"^" + name + r"\s*:")
 
+def _yaml_quote_closed(val, quote_char):
+    i = 1
+    n = len(val)
+    while i < n:
+        ch = val[i]
+        if quote_char == "'":
+            if ch == "'":
+                if i + 1 < n and val[i + 1] == "'":
+                    i += 2
+                    continue
+                return True
+        else:
+            if ch == "\\":
+                i += 2
+                continue
+            if ch == '"':
+                return True
+        i += 1
+    return False
+
+def _clean_multiline(text, quote_char=None):
+    text = text.strip()
+    if quote_char == "'" and len(text) >= 2 and text[0] == "'" and text[-1] == "'":
+        text = text[1:-1].replace("''", "'")
+    elif quote_char == '"' and len(text) >= 2 and text[0] == '"' and text[-1] == '"':
+        text = text[1:-1].replace('\\"', '"').replace("\\\\", "\\")
+    return " ".join(text.split())
+
 def read_fields():
     f = {"campaign_status": "", "measurement_state": "", "root_status": "",
          "status": "", "active_role": ""}
     prep, total, project = {}, {}, {"status": ""}
     top = ""
+    prep_keys = dict(PREP_DEFAULTS)
+    total_keys = dict(TOTAL_DEFAULTS)
     try:
-        for raw in open(STATE, encoding="utf-8", errors="replace"):
+        raw_lines = open(STATE, encoding="utf-8", errors="replace").read().splitlines()
+        idx, total_n = 0, len(raw_lines)
+        while idx < total_n:
+            raw = raw_lines[idx]
+            idx += 1
             line = strip_inline_comment(raw)
             s = line.strip()
             if not s or s == "-":
@@ -226,18 +261,48 @@ def read_fields():
             if not m:
                 continue
             indent, key, val = len(m.group(1)), m.group(2), m.group(3).strip()
+            if (val.startswith("'") and not _yaml_quote_closed(val, "'")) or (val.startswith('"') and not _yaml_quote_closed(val, '"')):
+                qc = val[0]
+                buf = [val]
+                while idx < total_n:
+                    nxt = raw_lines[idx]
+                    nxt_strip = nxt.strip()
+                    nxt_indent = len(nxt) - len(nxt.lstrip(" "))
+                    if nxt_strip and nxt_indent <= indent and re.match(r"^([A-Za-z_][\w-]*)\s*:", nxt_strip):
+                        break
+                    idx += 1
+                    buf.append(nxt_strip)
+                    if _yaml_quote_closed(" ".join(buf), qc):
+                        break
+                resolved = _clean_multiline(" ".join(buf), qc)
+            elif re.match(r"^[|>][+-]?\d*$", val):
+                buf = []
+                while idx < total_n:
+                    nxt = raw_lines[idx]
+                    nxt_strip = nxt.strip()
+                    nxt_indent = len(nxt) - len(nxt.lstrip(" "))
+                    if nxt_strip and nxt_indent <= indent:
+                        break
+                    idx += 1
+                    if nxt_strip:
+                        buf.append(nxt_strip)
+                resolved = " ".join(buf)
+            else:
+                resolved = unquote(val)
+                if len(val) >= 2 and val[0] == "'" and val[-1] == "'":
+                    resolved = resolved.replace("''", "'")
             if indent == 0:
                 top = key
                 if key in f:
-                    f[key] = unquote(val)
+                    f[key] = resolved
                 if key == "project":
                     project = {"status": ""}
             elif top == "project" and key == "status":
-                project["status"] = unquote(val)
-            elif top == "prep" and key in dict(PREP_DEFAULTS):
-                prep[key] = unquote(val)
-            elif top == "total" and key in dict(TOTAL_DEFAULTS):
-                total[key] = unquote(val)
+                project["status"] = resolved
+            elif top == "prep" and key in prep_keys:
+                prep[key] = resolved
+            elif top == "total" and key in total_keys:
+                total[key] = resolved
     except OSError:
         pass
     f["project_status"] = project.get("status", "")
@@ -846,8 +911,10 @@ def cmd_cost_delta():
 
 def cmd_prep_snapshot():
     f, prep, total = read_fields()
-    print("LAST_ARTIFACT=" + str(prep.get("last_informative_artifact", "none")))
-    print("LAST_OBS=" + str(prep.get("last_informative_observation", "none")))
+    art = " ".join(str(prep.get("last_informative_artifact", "none")).split()) or "none"
+    obs = " ".join(str(prep.get("last_informative_observation", "none")).split()) or "none"
+    print("LAST_ARTIFACT=" + art)
+    print("LAST_OBS=" + obs)
 
 def cmd_auth_json():
     """S3：授权事件真序列化（justification 经环境变量传入）。"""
@@ -952,8 +1019,16 @@ parse_usage() {  # $1=引擎 stdout 文件 $2=当前SID（codex 累计差分用�
   v=$(printf '%s\n' "$u" | sed -n 's/^CODEX_CUM=//p'); [ -n "$v" ] && U_CUM="$v"
   return 0
 }
-append_engine_logs() {  # 原始 stdout/stderr 全量入 campaign_log（服务失败也不丢）
+append_engine_logs() {  # 原始 stdout/stderr 全量入 campaign_log（服务失败也不丢，超阈值轮转）
   [ -n "${TD:-}" ] || return 0
+  local max_bytes="${LEMVO_CAMPAIGN_LOG_MAX_BYTES:-52428800}"
+  if [ "${max_bytes:-0}" -gt 0 ] 2>/dev/null && [ -f campaign_log.txt ]; then
+    local cur_bytes
+    cur_bytes=$(wc -c < campaign_log.txt 2>/dev/null || echo 0)
+    if [ "${cur_bytes:-0}" -ge "$max_bytes" ] 2>/dev/null; then
+      mv -f campaign_log.txt campaign_log.prev.txt 2>/dev/null || true
+    fi
+  fi
   [ -f "$TD/engine-stdout.jsonl" ] && cat "$TD/engine-stdout.jsonl" >> campaign_log.txt
   [ -f "$TD/engine-stderr.log" ] && cat "$TD/engine-stderr.log" >> campaign_log.txt 2>/dev/null || true
   return 0
@@ -1386,6 +1461,17 @@ obj = {"schema_version": 1, "schema": "lemvo-turn-result",
        "scientific_verdict": {"campaign_status": cs, "measurement_state": ms, "root_status": rs},
        "artifact_refs": [art] if art and art != "none" else [],
        "ended_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+# Structured worker waiting is operational evidence. A textual next_task is
+# not permission to turn an explicit wait into another model invocation.
+if status == "succeeded" and nxt == "continue" and rcv == "0":
+    try:
+        with open(os.path.join(td, "work-result.json")) as stream:
+            work = json.load(stream)
+        if isinstance(work, dict) and work.get("status") == "waiting":
+            obj["next_action"] = "waiting_jobs"
+            obj["runtime_reason"] = "work-unit-idle"
+    except (OSError, ValueError):
+        pass  # Keep legacy workers without a structured result compatible.
 if os.path.exists(os.path.join(td, "timeout.json")):
     obj["runtime_reason"] = "turn-timeout"
 elif os.environ.get("LEMVO_TURN_INTERRUPTED") == "yes":
@@ -1485,6 +1571,11 @@ PYEP
     printf 'RUNNING|WATCHDOG_ERROR|turn_id=%s\n' "$TURN_ID" > .lemvo-status
   fi
   wait "$engpid"; rc=$?
+  if [ "$rc" -eq 0 ] && [ "$watch_rc" -ne 124 ] && [ -f "$RUNTIME_IDLE" ]; then
+    # Capture before bookkeeping and before publishing successful completion.
+    # If this write fails, recovery has only the recorded dispatch versions.
+    python3 "$RUNTIME_IDLE" capture-worker "$TD" || say "Idle worker snapshot unavailable; preserve dispatch versions for recovery."
+  fi
   if [ -n "$heartbeat_pid" ]; then
     kill "$heartbeat_pid" 2>/dev/null || true
     wait "$heartbeat_pid" 2>/dev/null || true

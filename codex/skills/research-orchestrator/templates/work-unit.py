@@ -12,8 +12,25 @@ import math
 import os
 from pathlib import Path
 import re
+import importlib.util
 import tempfile
 import time
+
+
+_IDLE_MOD = None
+
+
+def _load_idle_module():
+    global _IDLE_MOD
+    if _IDLE_MOD is None:
+        idle = Path(__file__).with_name('runtime-idle.py')
+        if idle.is_file():
+            spec = importlib.util.spec_from_file_location('_lemvo_runtime_idle', str(idle))
+            if spec is not None and spec.loader is not None:
+                mod = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(mod)
+                _IDLE_MOD = mod
+    return _IDLE_MOD
 
 
 VERSION = 1
@@ -150,6 +167,14 @@ def file_record(path, max_chars=5000):
             digest = hashlib.sha256(raw).hexdigest()
             sample = raw.decode('utf-8', errors='replace')
             basis = 'full-file'
+            if p.name == 'research-state.yaml':
+                mod = _load_idle_module()
+                if mod is not None:
+                    # Ledger counters remain in the excerpt for honest budget
+                    # decisions, but do not masquerade as a scientific change.
+                    scientific = mod.scientific_state_text(sample)
+                    digest = hashlib.sha256(scientific.encode('utf-8')).hexdigest()
+                    basis = 'scientific-state-content'
         else:
             with p.open('rb') as f:
                 head = f.read(32768)
@@ -168,7 +193,7 @@ def file_record(path, max_chars=5000):
         body, truncated = excerpt(sample, max_chars)
         return {'path': str(p), 'bytes': st.st_size, 'fingerprint': digest,
                 'fingerprint_basis': basis, 'excerpt': body,
-                'excerpt_truncated': truncated or basis != 'full-file'}
+                'excerpt_truncated': truncated or basis not in ('full-file', 'scientific-state-content')}
     except OSError:
         return None
 
@@ -337,7 +362,15 @@ def next_task(fields, source, last):
             line = guidance_first_line(raw)
             if line:
                 return line, 'current-user-message: ' + original, None
-    requested = last.get('next_task') if isinstance(last, dict) else None
+    was_waiting = isinstance(last, dict) and last.get('status') == 'waiting'
+    if was_waiting and ((source and text(source).strip()) or os.environ.get('LEMVO_RESOURCE_WAKE')):
+        # A genuine new event gets a new work packet. Do not copy the old
+        # waiting worker's free-form "next_task" back as another idle task.
+        return ('Process the newly delivered runtime event or changed scientific sources; '
+                'read the actual new result once, preserve completed work, and select '
+                'the next concrete authorized research action or register its real dependency.',
+                'new-runtime-event-after-wait', 'analysis')
+    requested = last.get('next_task') if isinstance(last, dict) and not was_waiting else None
     if isinstance(requested, dict) and requested.get('objective'):
         return str(requested['objective']), 'previous-work-result.next_task', requested.get('kind')
     objective = first(fields, ['prep.next_min_probe', 'next_min_probe', 'research_plan.next_action',
