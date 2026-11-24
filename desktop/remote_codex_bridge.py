@@ -420,11 +420,24 @@ job identities, and existing training. This is execution guidance, not a researc
     return arguments(argv,sid,prompt)
 
 
+def _wants_fresh_session(argv):
+    args = list(argv[:-1]) if len(argv) > 1 else []
+    if 'resume' not in args:
+        return True
+    turn_dir = os.environ.get('LEMVO_TURN_DIR')
+    if turn_dir:
+        plan = read(Path(turn_dir) / 'context-plan.json')
+        if isinstance(plan, dict) and plan.get('session_action') == 'fresh':
+            return True
+    return False
+
+
 def engine(argv):
     p = Project(os.getcwd())
     rid = uuid.uuid4().hex
     my = {'pid': os.getpid(), 'start': identity(os.getpid()), 'request_id': None}
     prompt = argv[-1]
+    wants_fresh = _wants_fresh_session(argv)
     with p.lock():
         if p.pending(p.active()):
             raise RuntimeError('service unavailable: another desktop/server model invocation is still in flight')
@@ -442,7 +455,8 @@ def engine(argv):
                 my['request_id'] = rid
                 atomic(p.root / 'active.json', my)
                 r = {'id': rid, 'status': 'queued', 'prompt': prompt,
-                     'sid': c.get('sessions', {}).get('windows'), 'created_at': time.time(),
+                     'sid': None if wants_fresh else c.get('sessions', {}).get('windows'),
+                     'created_at': time.time(),
                      'project': str(p.project)}
                 atomic(d / 'request.json', r)
             offsets = {'stdout.jsonl': 0, 'stderr.log': 0}
@@ -490,7 +504,12 @@ def engine(argv):
                 time.sleep(0.3)
         with p.lock():
             c = p.config()
-        cmd = c['server_command'] + server_arguments(argv, c.get('sessions', {}).get('server'), prompt, c.get('server_approval','preserve'))
+        cmd = c['server_command'] + server_arguments(
+            argv,
+            None if wants_fresh else c.get('sessions', {}).get('server'),
+            prompt,
+            c.get('server_approval', 'preserve'),
+        )
         env = dict(os.environ)
         env['PATH'] = os.pathsep.join(x for x in env.get('PATH', '').split(os.pathsep) if x != str(p.root / 'bin'))
         child = subprocess.Popen(cmd, cwd=str(p.project), env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE)

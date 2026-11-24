@@ -2,12 +2,22 @@
 
 > 改编自 ARS (academic-research-skills, Cheng-I Wu, CC-BY-NC 4.0) 的 research_question_agent 与 devils_advocate_agent Checkpoint 1，并按用户工作流改造：AI 先查证再提问，用户只做选择题。
 
+## 任务路由：受托基线任务 vs 开放探索课题（必选分支）
+
+启动 BOOTSTRAP 时先区分两类输入，不搞"一刀切 Gate 1 必过"：
+
+- **A 类 — 受托任务 / 基线复现 / 明确方法起点**（存在明确 `CHARTER.md` / 任务书、既有基准、指定指标或父实现）：
+  **跳过 Gate 0 与多候选 RQ 发散循环**。只做一段紧凑 **Scope & Eval Contract 核对**（目标指标 + 方向、基线/parent 实现与数据源、资源/授权边界、明显风险），写入 `docs/<slug>-rq-brief.md` 后直接进入基线复现与代码验证。
+- **B 类 — 模糊 / 开放探索课题**（用户输入宽泛或尚未锁定研究问题）：
+  依次执行下方 Gate 0（按需）与轻量 Gate 1 FINER 摸底。
+
 ## Gate 0 — 带证据的引导（输入模糊时触发）
 
 触发条件：用户输入没有明确研究问题（"我对 X 感兴趣但不确定做啥"、"帮我想想方向"）。
 
 ```
-1. AI 侦察（不问用户）：arxiv MCP + web_search 快速扫描
+1. AI 侦察（不问用户）：若当前会话具备 arxiv MCP / web_search 等联网检索工具
+   则先快速扫描（否则诚实基于本地代码与文献资产并说明限制，绝不伪造检索）
    —— 领域最近在做什么、什么已饱和、公开 gap 在哪
 2. AI 生成 3-5 个候选研究问题，每个附证据（相关论文、缺口、风险）
 3. AI 对每个候选做 FINER 打分（见下）
@@ -21,7 +31,7 @@
 
 可选教学变体（用户明确说"用苏格拉底模式引导我"时启用）：纯提问五层引导（问题框架→方法反思→证据设计→批判自省→意义贡献），每层≥2轮，绝不直接给答案。完整协议见 `socratic-protocol.md`。
 
-## Gate 1 — FINER 问题审判（每次 BOOTSTRAP 必过）
+## Gate 1 — FINER 问题摸底（仅 B 类开放探索课题触发）
 
 ```
 1. 主题分解 → 生成 3-5 个候选 RQ（描述/比较/因果/评估型混编）
@@ -32,12 +42,18 @@
    | Novel | 纯重复前人 | 新视角/方法/证据 |
    | Ethical | 重大伦理问题 | 收益大于风险 |
    | Relevant | 无理论/实践意义 | 直接指导实践/理论 |
-   判决线：平均 ≥ 3.0 且无一维 < 2；不过 → REVISE 重来
+   打分用途是摸底与暴露弱点，**不是数值否决门**：不设分数线、不达标不循环
+   重审。Novel/Relevant 属论文级维度，只影响写作路由与优先级，不作探索前置
+   否决（约束语义见 constraint-governance.md）。Feasible 低分处理：区分真实
+   执行障碍（给最小变更或资源申请）与尚未满足的最终主张要求（不阻塞探索）。
+   弱点如实写进 RQ Brief，进内循环时携带。
 3. Scope 边界：IN SCOPE / OUT OF SCOPE / ASSUMPTIONS
 4. 方法论蓝图：范式、方法选择、数据策略、分析框架、效度标准
    （ML 实验类课题可精简为：评估指标、baseline、数据、oracle）
 5. 魔鬼代言人 Checkpoint：RQ 可回答吗？方法配得上问题吗？scope 过宽/过窄？
-   最强反对意见是什么？→ PASS / REVISE（REVISE 附具体修改意见，回 step 1）
+   最强反对意见是什么？→ 记录反对意见与应对；**最多 1 轮 REVISE**（附具体
+   修改意见回 step 1），仍不收敛则带着记录的弱点继续——REVISE 不是无限
+   循环重审门，理论/基准/效率课题按其证据类型判断可回答性，不强加实验模板
 6. 产出 RQ Brief 落盘到**项目工作区** `docs/<slug>-rq-brief.md`（orchestrator 工作区为项目根布局；不写到全局 outputs/.plans/，避免两套路径约定分叉），下游消费：
    - scope 边界 → literature-review 的检索约束
    - 方法论蓝图 → experiment-forge 的任务包输入

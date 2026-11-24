@@ -41,7 +41,9 @@ Read [runtime-recovery.md](references/runtime-recovery.md) when starting a contr
 
 ```
 BOOTSTRAP（轻量，一次）
-  明确核心研究问题 → literature-review 摸底 → 双闸门（Gate 0 输入引导；Gate 1 FINER 摸底，不作分数否决）
+  区分受托基线任务 vs 开放探索课题（详见 references/rq-gates.md）：
+  - 受托/基线复现：紧凑 Scope & Eval Contract 核对 → 直接进基线与代码验证（跳过 Gate 0/多 RQ 发散）
+  - 开放探索：literature-review 摸底（按实际可用检索工具）→ Gate 0/1 FINER 摸底（非否决门）
   → 锁定评估基准（eval_baseline / eval_contract / noise_band / direction）
   → 初始化 .lemvo-portfolio.json 正交策略槽与首个可运行 T2/T3 机制假设
 

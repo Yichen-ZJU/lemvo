@@ -67,7 +67,7 @@
 set -uo pipefail
 # One version source: write_helper emits this marker into the generated Python.
 # Bump on helper changes so existing project-local helpers migrate exactly once.
-HELPER_VERSION="4.14"
+HELPER_VERSION="4.15"
 RUNTIME_SUPPORT="$(cd "$(dirname "$0")" && pwd)/runtime-support.py"
 RUNTIME_CONTRACT="$(cd "$(dirname "$0")" && pwd)/runtime-contract.py"
 WORK_UNIT="$(cd "$(dirname "$0")" && pwd)/work-unit.py"
@@ -383,6 +383,28 @@ def cmd_budget_gate():
     print("BUDGET_GATE_ACTIVE=" + ("yes" if authorized else "no"))
     print("BUDGET_EXHAUSTED=" + exhausted)
 
+def _applied_path():
+    td = os.environ.get("LEMVO_TURN_DIR", "").strip()
+    return os.path.join(td, ".accounting-applied.json") if (td and os.path.isdir(td)) else None
+
+def _load_applied(path):
+    if not path or not os.path.exists(path):
+        return {}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            d = json.load(fh)
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+def _save_applied(path, data):
+    if not path:
+        return
+    tmp = "%s.tmp-%d" % (path, os.getpid())
+    with open(tmp, "w", encoding="utf-8") as fh:
+        json.dump(data, fh, indent=1, sort_keys=True)
+    os.replace(tmp, path)
+
 def cmd_budget_add():
     """F2 结算累计（R1 单位分账）：模型费用（USD）只入 unit=usd 的金额账
     budget.used/remaining；非 usd 旧账（gpu_hours/wall_hours 等）不再吸收美元
@@ -391,6 +413,13 @@ def cmd_budget_add():
     increment 由调用方按成本口径算好（per-call/delta>=0 用 delta；
     负 delta=基线重置用 reported；unknown 不加）。"""
     global LINES
+    apath = _applied_path()
+    applied = _load_applied(apath)
+    if "budget_add" in applied and isinstance(applied["budget_add"], dict):
+        for ln in applied["budget_add"].get("lines", []):
+            print(ln)
+        print("IDEMPOTENT_SKIP=yes")
+        return
     inc = sys.argv[2] if len(sys.argv) > 2 else "unknown"
     if inc == "unknown":
         print("BUDGET_USED_NOW=unknown"); return
@@ -408,8 +437,14 @@ def cmd_budget_add():
         LINES = open(STATE, encoding="utf-8").read().splitlines()
         set_section_key(LINES, "total", "cost_usd_total", newv)
         open(STATE, "w", encoding="utf-8").write("\n".join(LINES) + "\n")
-        print("BUDGET_ADD_SKIPPED=non-usd-unit(" + str(b["unit"]) + ")")
-        print("COST_USD_TOTAL_NOW=" + str(newv))
+        out_lines = [
+            "BUDGET_ADD_SKIPPED=non-usd-unit(" + str(b["unit"]) + ")",
+            "COST_USD_TOTAL_NOW=" + str(newv),
+        ]
+        applied["budget_add"] = {"lines": out_lines}
+        _save_applied(apath, applied)
+        for ln in out_lines:
+            print(ln)
         return
     if b["used"] not in (None, "") and num_or_none(b["used"]) is None:
         print("BUDGET_USED_NOW=unknown"); return
@@ -425,7 +460,11 @@ def cmd_budget_add():
     if cap is not None:
         set_section_key(LINES, "budget", "remaining", round(cap - used, 6))
     open(STATE, "w", encoding="utf-8").write("\n".join(LINES) + "\n")
-    print("BUDGET_USED_NOW=" + str(used))
+    out_lines = ["BUDGET_USED_NOW=" + str(used)]
+    applied["budget_add"] = {"lines": out_lines}
+    _save_applied(apath, applied)
+    for ln in out_lines:
+        print(ln)
 
 def cmd_gpu_add():
     """R1：GPU 小时纯统计入口（只记录，永不作门）。argv:
@@ -673,6 +712,16 @@ def cmd_settle():
         print("NEW_PROGRESS=no"); print("ARTIFACT_TYPED=no")
         print("PREP_TURNS_NOW=0"); print("TOTAL_TURNS_NOW=0")
         print("STATE_MISSING=yes"); return
+    apath = _applied_path()
+    applied = _load_applied(apath)
+    if "settle" in applied and isinstance(applied["settle"], dict):
+        cached = applied["settle"]
+        print("NEW_PROGRESS=" + ("yes" if cached.get("new_progress") else "no"))
+        print("ARTIFACT_TYPED=" + ("yes" if cached.get("typed") else "no"))
+        print("PREP_TURNS_NOW=" + str(cached.get("prep_turns", 0)))
+        print("TOTAL_TURNS_NOW=" + str(cached.get("total_turns", 0)))
+        print("IDEMPOTENT_SKIP=yes")
+        return
     f, prep, total = read_fields()
     init_sections(f, prep, total)
     artifact = prep.get("last_informative_artifact", "none")
@@ -714,6 +763,13 @@ def cmd_settle():
         set_in("prep", "last_artifact_sha", new_sha)
     set_in("total", "total_turns", total_turns)
     open(STATE, "w", encoding="utf-8").write("\n".join(LINES) + "\n")
+    applied["settle"] = {
+        "new_progress": bool(new_progress),
+        "typed": bool(typed),
+        "prep_turns": turns,
+        "total_turns": total_turns,
+    }
+    _save_applied(apath, applied)
     print("NEW_PROGRESS=" + ("yes" if new_progress else "no"))
     print("ARTIFACT_TYPED=" + ("yes" if typed else "no"))
     print("PREP_TURNS_NOW=" + str(turns))
@@ -725,6 +781,12 @@ def cmd_account():
     global LINES
     if not os.path.exists(STATE):
         print("WALL_NOW=state-missing"); return
+    apath = _applied_path()
+    applied = _load_applied(apath)
+    if "account" in applied and isinstance(applied["account"], dict):
+        print("WALL_NOW=" + str(applied["account"].get("wall_min", "0.0")))
+        print("IDEMPOTENT_SKIP=yes")
+        return
     elapsed = float(sys.argv[2])
     tin, tout = sys.argv[3], sys.argv[4]
     f, prep, total = read_fields()
@@ -742,6 +804,8 @@ def cmd_account():
     if tout != "unknown":
         set_in("total", "total_tokens_out", int(num(total.get("total_tokens_out"))) + int(tout))
     open(STATE, "w", encoding="utf-8").write("\n".join(LINES) + "\n")
+    applied["account"] = {"wall_min": wall}
+    _save_applied(apath, applied)
     print("WALL_NOW=" + str(wall))
 
 def output_events(path):
@@ -892,7 +956,7 @@ def cmd_cost_delta():
         # r29-fix3 P1-1：reader 兼容旧字符串快照（writer 曾写 "3"）——
         # 可解析为有限数则采用，bool/非数拒收；不清零旧账。
         for ev in ledger_events():
-            if ev.get("type") in ("work-turn", "prep-turn", "recovered-turn", "runtime-interrupted", "runtime-error", "wait-assessment") and ev.get("sid") == sid:
+            if ev.get("type") in ("work-turn", "prep-turn", "recovered-turn", "runtime-interrupted", "runtime-error", "wait-assessment", "service-error") and ev.get("sid") == sid:
                 v = ev.get("cost_usd_reported")
                 if isinstance(v, str):
                     try:
@@ -931,11 +995,20 @@ def cmd_auth_available():
               (not request and ev.get("justification")==just)) for ev in ledger_events())
     print("yes" if just and not used else "no")
 
+TURN_USAGE_TYPES = ("work-turn", "prep-turn", "recovered-turn", "runtime-interrupted", "runtime-error", "wait-assessment", "service-error")
+
 def cmd_ledger_append():
     obj = json.loads(sys.stdin.read())
     if isinstance(obj, dict) and obj.get("turn_id"):
+        tid = obj.get("turn_id")
+        otyp = obj.get("type")
         for ev in ledger_events():
-            if ev.get("type") == obj.get("type") and ev.get("turn_id") == obj.get("turn_id"):
+            if ev.get("turn_id") != tid:
+                continue
+            if otyp in TURN_USAGE_TYPES and ev.get("type") in TURN_USAGE_TYPES:
+                print("duplicate-skipped")
+                return
+            if ev.get("type") == otyp:
                 print("duplicate-skipped")
                 return
     ledger_append(obj)
@@ -1019,7 +1092,7 @@ parse_usage() {  # $1=引擎 stdout 文件 $2=当前SID（codex 累计差分用�
   v=$(printf '%s\n' "$u" | sed -n 's/^CODEX_CUM=//p'); [ -n "$v" ] && U_CUM="$v"
   return 0
 }
-append_engine_logs() {  # 原始 stdout/stderr 全量入 campaign_log（服务失败也不丢，超阈值轮转）
+append_engine_logs() {  # 原始 stdout/stderr 入 campaign_log（过滤逐 token stream_event；TD/engine-stdout.jsonl 保留原文）
   [ -n "${TD:-}" ] || return 0
   local max_bytes="${LEMVO_CAMPAIGN_LOG_MAX_BYTES:-52428800}"
   if [ "${max_bytes:-0}" -gt 0 ] 2>/dev/null && [ -f campaign_log.txt ]; then
@@ -1029,7 +1102,26 @@ append_engine_logs() {  # 原始 stdout/stderr 全量入 campaign_log（服务�
       mv -f campaign_log.txt campaign_log.prev.txt 2>/dev/null || true
     fi
   fi
-  [ -f "$TD/engine-stdout.jsonl" ] && cat "$TD/engine-stdout.jsonl" >> campaign_log.txt
+  if [ -f "$TD/engine-stdout.jsonl" ]; then
+    if [ "${LEMVO_CAMPAIGN_LOG_RAW_PARTIALS:-0}" = "1" ]; then
+      cat "$TD/engine-stdout.jsonl" >> campaign_log.txt
+    else
+      python3 - "$TD/engine-stdout.jsonl" >> campaign_log.txt <<'PYLOG' 2>/dev/null || cat "$TD/engine-stdout.jsonl" >> campaign_log.txt
+import json, sys
+with open(sys.argv[1], encoding="utf-8", errors="replace") as fh:
+    for line in fh:
+        s = line.strip()
+        if s.startswith("{"):
+            try:
+                obj = json.loads(s)
+                if isinstance(obj, dict) and obj.get("type") == "stream_event":
+                    continue
+            except ValueError:
+                pass
+        sys.stdout.write(line)
+PYLOG
+    fi
+  fi
   [ -f "$TD/engine-stderr.log" ] && cat "$TD/engine-stderr.log" >> campaign_log.txt 2>/dev/null || true
   return 0
 }
@@ -1058,6 +1150,7 @@ if [ -n "$RECOVER_TD" ]; then
 try: print(json.load(open(sys.argv[1]+"/manifest.json")).get("turn_id",""))
 except Exception: print("")' "$TD" 2>/dev/null)
   [ -n "$TURN_ID" ] || TURN_ID=$(basename "$TD")
+  export LEMVO_TURN_DIR="$TD" LEMVO_TURN_ID="$TURN_ID"
   OUT="$TD/engine-stdout.jsonl"; ERR="$TD/engine-stderr.log"
   REC_OUTCOME=$(python3 "$HELPER" outcome-from "$OUT" | sed -n 's/^OUTCOME=//p')
   if [ "$REC_OUTCOME" != "ok" ]; then
@@ -1081,7 +1174,6 @@ sys.exit(1)' "$LEDGER" "$NEW_SID" 2>/dev/null; then
     say "recover：SID $NEW_SID 有 session-poisoned 记录——不收养（防毒会话复活）"
     NEW_SID=""
   fi
-  [ -n "$NEW_SID" ] && echo "$NEW_SID" > "$SID_FILE"
   helper init >/dev/null 2>&1 || true
   if [ -f "$TD/progress-explicit-before.json" ]; then
     # A successful orphan uses the same construction record as a normal turn.
@@ -1170,8 +1262,27 @@ os.replace(tmp, p)
 PYRW
   python3 "$RUNTIME_CONTRACT" receipt "$TD" || exit 4
   if [ -f "$WORK_UNIT" ]; then
-    python3 "$WORK_UNIT" settle "$TD" --rc 0 --session-file "$SID_FILE" \
-      || say "Recovered work handoff can be reconstructed from the saved result."
+    REC_SID_ARG="$SID_FILE"
+    if [ -n "$NEW_SID" ]; then
+      printf '%s\n' "$NEW_SID" > "$TD/.recovered-sid"
+      REC_SID_ARG="$TD/.recovered-sid"
+    fi
+    if python3 "$WORK_UNIT" settle "$TD" --rc 0 --session-file "$REC_SID_ARG"; then
+      if [ -n "$NEW_SID" ] && python3 -c 'import json,sys
+try:
+ d=json.load(open(sys.argv[1]))
+ sys.exit(1 if d.get("promoted") is False else 0)
+except Exception:
+ sys.exit(0)' "$TD/work-settlement.json" 2>/dev/null; then
+        printf '%s\n' "$NEW_SID" > "$SID_FILE.tmp-$$" && mv "$SID_FILE.tmp-$$" "$SID_FILE"
+      elif [ -n "$NEW_SID" ]; then
+        say "recover：旧轮次 SID $NEW_SID 未覆盖当前主会话（work-settlement promoted=false）"
+      fi
+    else
+      say "Recovered work handoff can be reconstructed from the saved result."
+    fi
+  elif [ -n "$NEW_SID" ]; then
+    printf '%s\n' "$NEW_SID" > "$SID_FILE.tmp-$$" && mv "$SID_FILE.tmp-$$" "$SID_FILE"
   fi
   [ -f "$TD/engine.json" ] && python3 -c 'import json,sys
 p=sys.argv[1]+"/engine.json"
@@ -1395,6 +1506,7 @@ if [ -z "$TD" ]; then
   TURN_ID="t$(date -u +%Y%m%dT%H%M%SZ)-$$-solo"
   TD="turns/$TURN_ID"
   mkdir -p "$TD"
+export LEMVO_TURN_DIR="$TD" LEMVO_TURN_ID="$TURN_ID"
   python3 - "$TD" "$TURN_ID" "$PROJ_DIR" "$ENGINE" <<'PYMS'
 import json, os, socket, sys, time
 td, tid, proj, eng = sys.argv[1:5]
@@ -1408,6 +1520,7 @@ json.dump(man, open(os.path.join(td, "manifest.json"), "w"), indent=1)
 PYMS
 fi
 mkdir -p "$TD"
+export LEMVO_TURN_DIR="$TD" LEMVO_TURN_ID="$TURN_ID"
 # A work packet is an execution handoff, never a new scientific admission gate.
 SESSION_ACTION=resume
 if [ -f "$WORK_UNIT" ]; then
@@ -1653,10 +1766,32 @@ elif [ "$rc" -ne 0 ]; then
     say "服务/账号类错误（限流/认证/基础设施）——保留 SID，不计 resume-fail；计量尽力而为"
     parse_usage "$TD/engine-stdout.jsonl" "${CUR_SID:-none}"
     python3 "$HELPER" account "$(( $(date +%s) - TURN_START ))" "$U_IN" "$U_OUT" >/dev/null 2>&1 || true
+    SE_COST_DELTA=unknown; SE_COST_BASIS=unknown
+    if [ "$U_COST" != "unknown" ]; then
+      SE_CD_OUT=$(python3 "$HELPER" cost-delta "${CUR_SID:-none}" "$U_COST" "$ENGINE" 2>/dev/null || true)
+      SE_COST_DELTA=$(printf '%s\n' "$SE_CD_OUT" | sed -n 's/^COST_DELTA=//p')
+      SE_COST_BASIS=$(printf '%s\n' "$SE_CD_OUT" | sed -n 's/^COST_BASIS=//p')
+      [ -z "$SE_COST_DELTA" ] && SE_COST_DELTA=unknown
+      [ -z "$SE_COST_BASIS" ] && SE_COST_BASIS=unknown
+    fi
+    SE_REP_JSON=$(python3 -c 'import json, math, sys
+v = sys.argv[1]
+try:
+    f = float(v)
+    print(json.dumps(f) if math.isfinite(f) else json.dumps(v))
+except (TypeError, ValueError):
+    print(json.dumps(v))' "$U_COST" 2>/dev/null || echo '"unknown"')
     SE=$(mktemp)
-    printf '{"type":"service-error","turn_id":"%s","sid":"%s","rc":%d,"tokens_in":"%s","tokens_out":"%s","cache_read":"%s","cache_write":"%s","cost_usd_est":"%s","ts":"%s"}\n' \
-      "$TURN_ID" "${CUR_SID:-none}" "$rc" "$U_IN" "$U_OUT" "$U_CR" "$U_CW" "$U_COST" "$(date -u +%FT%TZ)" > "$SE"
+    printf '{"type":"service-error","turn_id":"%s","sid":"%s","rc":%d,"tokens_in":"%s","tokens_out":"%s","cache_read":"%s","cache_write":"%s","cost_usd_est":"%s","cost_usd_reported":%s,"cost_usd_delta":"%s","cost_basis":"%s","ts":"%s"}\n' \
+      "$TURN_ID" "${CUR_SID:-none}" "$rc" "$U_IN" "$U_OUT" "$U_CR" "$U_CW" "$U_COST" "$SE_REP_JSON" "$SE_COST_DELTA" "$SE_COST_BASIS" "$(date -u +%FT%TZ)" > "$SE"
     helper ledger-append < "$SE" || true; rm -f "$SE"
+    if [ "$SE_COST_DELTA" != "unknown" ]; then
+      SE_BINC="$SE_COST_DELTA"
+      case "$(python3 -c "import sys; sys.exit(0 if float(sys.argv[1]) < 0 else 1)" "$SE_COST_DELTA" 2>/dev/null; echo $?)" in
+        0) SE_BINC="$U_COST";;
+      esac
+      [ "$SE_BINC" != "unknown" ] && python3 "$HELPER" budget-add "$SE_BINC" >/dev/null 2>&1 || true
+    fi
     append_engine_logs   # v4.5：服务失败也不丢原始 stdout/stderr
     finalize_engine_json "service-error"
     write_result "service-error" "runtime_error" "$rc"

@@ -3,6 +3,7 @@
 
 A finished branch can wake the researcher while other producers remain alive.
 Receipts represent execution observations, never a scientific verdict.
+Python 3.6+ stdlib only.
 """
 import argparse
 from contextlib import contextmanager
@@ -33,6 +34,11 @@ _NON_TERMINAL_JSON_STATUSES = (
 _GENERIC_DIR_NAMES = frozenset((
     'tmp', 'temp', 'work', 'workspace', 'sub', 'logs', 'log', 'outputs', 'output',
     'data', 'home', 'root', 'runs', 'run', 'test', 'tests', 'agents',
+))
+_SENTINEL_META_KEYS = frozenset((
+    'run_id', 'status', 'exit_code', 'pid', 'pid_start', 'attempt_id',
+    'resume_pid', 'resume_pid_start', 'resume_attempt_id',
+    'settings', 'split', 'comparison', 'evidence_scope', 'seed', 'eval_contract',
 ))
 
 
@@ -247,7 +253,6 @@ def active_attempt(job):
 
 
 def producer_started(job, attempt=None):
-    # Active attempt identity wins over mutable registration timestamps.
     if attempt is None:
         attempt = active_attempt(job)
     expected = attempt.get('pid_start')
@@ -274,7 +279,48 @@ def _matches_resumed_attempt(obj, attempt):
     return False
 
 
-def marker(path, job, running, allow_plain_text_sentinel=True, is_failed_marker=False, attempt=None):
+def _explicit_attempt_match(obj, attempt):
+    """True when marker JSON explicitly names a matching attempt_id / pid_start / pid."""
+    if not isinstance(obj, dict):
+        return False
+    obj_aid = obj.get('attempt_id') if obj.get('attempt_id') is not None else obj.get('resume_attempt_id')
+    obj_pstart = obj.get('pid_start') if obj.get('pid_start') is not None else obj.get('resume_pid_start')
+    obj_pid = obj.get('pid') if obj.get('pid') is not None else obj.get('resume_pid')
+    att_aid = attempt.get('attempt_id')
+    att_pstart = attempt.get('pid_start')
+    att_pid = attempt.get('pid')
+    if att_aid is not None and obj_aid is not None:
+        if str(obj_aid) != str(att_aid):
+            return False
+        if att_pstart is not None and obj_pstart is not None and str(obj_pstart) != str(att_pstart):
+            return False
+        if att_pid is not None and obj_pid is not None and str(obj_pid) != str(att_pid):
+            return False
+        return True
+    if att_pstart is not None and obj_pstart is not None:
+        return str(obj_pstart) == str(attempt['pid_start']) and (
+            obj_pid is None or str(obj_pid) == str(att_pid)
+        )
+    if att_pid is not None and obj_pid is not None:
+        return str(obj_pid) == str(att_pid)
+    return False
+
+
+def _extract_metrics_payload(obj):
+    if not isinstance(obj, dict):
+        return None
+    m = obj.get('metrics')
+    if isinstance(m, (dict, list)) and m:
+        return m
+    r = obj.get('result')
+    if isinstance(r, dict) and r:
+        return r
+    extra = {k: v for k, v in obj.items() if k not in _SENTINEL_META_KEYS}
+    return extra if extra else None
+
+
+def marker(path, job, running, allow_plain_text_sentinel=True, is_failed_marker=False,
+           attempt=None, default_succeeded_without_status=False):
     """Return an owned, complete producer result or an explicit observation."""
     if not path:
         return None
@@ -286,9 +332,10 @@ def marker(path, job, running, allow_plain_text_sentinel=True, is_failed_marker=
         if not p.is_file() or stat.st_size == 0:
             return None
         started = producer_started(job, attempt)
-        if (started is not None and not job.get('accept_cached_markers')
-                and stat.st_mtime < started - 1):
-            return {'state': 'old-marker'}
+        if started is not None and not job.get('accept_cached_markers'):
+            tol = 0.0 if attempt.get('resumed') else 1.0
+            if stat.st_mtime < started - tol:
+                return {'state': 'old-marker'}
         with p.open(encoding='utf-8', errors='replace') as stream:
             raw = stream.read(262145)
     except OSError:
@@ -311,8 +358,7 @@ def marker(path, job, running, allow_plain_text_sentinel=True, is_failed_marker=
         if not allow_plain_text_sentinel:
             return {'state': 'non-terminal',
                     'result': {'non_terminal_result': str(p), 'reason': 'non_json_result_path'}}
-        # Existing plain-text completion sentinels remain compatible.
-        return {'state': 'succeeded', 'result': {'sentinel': 'non-json'},
+        return {'state': 'succeeded', 'result': {'sentinel': 'non-json'}, 'attributed': False,
                 'fingerprint': hashlib.sha256(raw.encode()).hexdigest()}
     if not isinstance(obj, dict):
         return {'state': 'incomplete', 'result': {'unparsed_result': str(p)}}
@@ -322,9 +368,9 @@ def marker(path, job, running, allow_plain_text_sentinel=True, is_failed_marker=
         return {'state': 'stale', 'result': {'run_id': obj.get('run_id'),
                                             'status': obj.get('status')}}
 
-    obj_pid = obj.get('pid')
-    obj_pstart = obj.get('pid_start')
-    obj_aid = obj.get('attempt_id')
+    obj_pid = obj.get('pid') if obj.get('pid') is not None else obj.get('resume_pid')
+    obj_pstart = obj.get('pid_start') if obj.get('pid_start') is not None else obj.get('resume_pid_start')
+    obj_aid = obj.get('attempt_id') if obj.get('attempt_id') is not None else obj.get('resume_attempt_id')
     if obj_aid is not None and attempt.get('attempt_id') is not None and str(obj_aid) != str(attempt['attempt_id']):
         return {'state': 'stale', 'result': {'attempt_id': obj_aid, 'status': obj.get('status')}}
     if obj_pstart is not None and attempt.get('pid_start') is not None and str(obj_pstart) != str(attempt['pid_start']):
@@ -345,12 +391,19 @@ def marker(path, job, running, allow_plain_text_sentinel=True, is_failed_marker=
         state = 'failed'
     elif status in _NON_TERMINAL_JSON_STATUSES:
         state = 'non-terminal'
+    elif default_succeeded_without_status and not status and (code is None or (is_int_code and code == 0)):
+        state = 'succeeded'
 
     result = {k: obj[k] for k in ('run_id', 'status', 'exit_code', 'settings',
-                                  'split', 'comparison', 'evidence_scope') if k in obj}
-    return {'state': state, 'exit_code': code if is_int_code else None, 'result': result,
-            'metrics': obj.get('metrics') if isinstance(obj.get('metrics'), (dict, list)) else None,
-            'fingerprint': hashlib.sha256(json.dumps(obj, sort_keys=True, ensure_ascii=False).encode()).hexdigest()}
+                                  'split', 'comparison', 'evidence_scope', 'seed', 'eval_contract') if k in obj}
+    return {
+        'state': state,
+        'exit_code': code if is_int_code else None,
+        'result': result,
+        'metrics': _extract_metrics_payload(obj),
+        'attributed': _explicit_attempt_match(obj, attempt),
+        'fingerprint': hashlib.sha256(json.dumps(obj, sort_keys=True, ensure_ascii=False).encode()).hexdigest(),
+    }
 
 
 def _select_path(job, keys):
@@ -381,11 +434,12 @@ def classify(job, now=None):
     running = bool(not external and attempt.get('alive'))
 
     sentinel_path = _select_path(job, SENTINEL_KEYS)
+    result_path = _select_path(job, RESULT_KEYS)
     if sentinel_path is not None:
         done_path = sentinel_path
         allow_plain_sentinel = True
     else:
-        done_path = _select_path(job, RESULT_KEYS)
+        done_path = result_path
         allow_plain_sentinel = False
     failed_path = _select_path(job, FAILED_KEYS)
 
@@ -402,23 +456,63 @@ def classify(job, now=None):
         row['original_pid'] = job.get('pid')
     if attempt.get('unbound_resume_pid'):
         row['unbound_resume_pid'] = True
-    row.update(done_file=done_path, external=external, producer_alive=running)
+    row.update(done_file=done_path, result_file=result_path, external=external, producer_alive=running)
 
-    observed = None
+    failed_obs = None
     if failed_path:
-        failed = marker(
+        cand = marker(
             failed_path, job, running,
             allow_plain_text_sentinel=True, is_failed_marker=True, attempt=attempt,
         )
-        if failed and failed['state'] not in ('old-marker', 'incomplete', 'stale', 'unknown', 'non-terminal'):
-            observed = failed
-            observed['state'] = 'failed'
-            row['failed_file'] = failed_path
-    if observed is None and done_path:
-        observed = marker(
+        if cand and cand['state'] not in ('old-marker', 'incomplete', 'stale', 'unknown', 'non-terminal'):
+            cand['state'] = 'failed'
+            failed_obs = cand
+
+    done_obs = None
+    if done_path:
+        done_obs = marker(
             done_path, job, running,
             allow_plain_text_sentinel=allow_plain_sentinel, is_failed_marker=False, attempt=attempt,
         )
+
+    observed = None
+    if failed_obs and done_obs and done_obs.get('state') == 'succeeded':
+        if done_obs.get('attributed') and not failed_obs.get('attributed'):
+            observed = done_obs
+        else:
+            observed = failed_obs
+            row['failed_file'] = failed_path
+    elif failed_obs:
+        observed = failed_obs
+        row['failed_file'] = failed_path
+    elif done_obs:
+        observed = done_obs
+
+    # Enrich plain-text or sentinel done_file completion with separate result_file payload
+    if observed and observed.get('state') == 'succeeded' and result_path and result_path != done_path:
+        res_obs = marker(
+            result_path, job, running,
+            allow_plain_text_sentinel=False, is_failed_marker=False,
+            attempt=attempt, default_succeeded_without_status=True,
+        )
+        if res_obs is None:
+            if not running:
+                observed.setdefault('result', {})['missing_result_file'] = result_path
+        elif res_obs.get('state') in ('incomplete', 'non-terminal') and running:
+            observed = {'state': 'running'}
+        elif res_obs.get('state') == 'succeeded':
+            if not observed.get('metrics') and res_obs.get('metrics'):
+                observed['metrics'] = res_obs['metrics']
+            if isinstance(res_obs.get('result'), dict):
+                merged_res = dict(res_obs['result'])
+                if isinstance(observed.get('result'), dict):
+                    merged_res.update(observed['result'])
+                observed['result'] = merged_res
+            observed['fingerprint'] = hashlib.sha256(
+                (str(observed.get('fingerprint') or '') + ':' + str(res_obs.get('fingerprint') or '')).encode()
+            ).hexdigest()
+        elif res_obs.get('state') == 'old-marker':
+            observed.setdefault('result', {})['stale_result_file'] = result_path
 
     harvested = False
     if not running:
@@ -458,7 +552,7 @@ def classify(job, now=None):
                 state = 'succeeded'
             elif raw_status in ('failed', 'error', 'oom', 'crashed'):
                 state = 'failed'
-        row.update({k: v for k, v in observed.items() if k not in ('state',)})
+        row.update({k: v for k, v in observed.items() if k not in ('state', 'attributed')})
         row['status'] = state
     elif running:
         row['status'] = 'running'
@@ -496,10 +590,8 @@ def classify(job, now=None):
 
 
 def event_key(row):
-    # Timestamps of this observation are excluded: an unchanged dead producer
-    # must not wake the model again on every polling tick or controller restart.
     value = {k: row.get(k) for k in ('run_id', 'name', 'pid', 'pid_start', 'done_file',
-                                    'failed_file', 'status', 'fingerprint', 'external')}
+                                    'result_file', 'failed_file', 'status', 'fingerprint', 'external')}
     if row.get('attempt_id') is not None:
         value['attempt_id'] = row.get('attempt_id')
     return hashlib.sha256(json.dumps(value, sort_keys=True).encode()).hexdigest()
@@ -515,9 +607,9 @@ def publish(rows, directory):
             key = event_key(row)
             p = directory / ('job-event-' + key + '.json')
             if p.exists():
-                continue  # Never reset a consumed receipt or partial consumer update.
+                continue
             rec = {k: row.get(k) for k in ('name', 'run_id', 'status', 'pid', 'pid_start',
-                                          'done_file', 'failed_file', 'exit_code', 'external',
+                                          'done_file', 'result_file', 'failed_file', 'exit_code', 'external',
                                           'metrics', 'result')}
             if row.get('attempt_id') is not None:
                 rec['attempt_id'] = row.get('attempt_id')
@@ -526,8 +618,6 @@ def publish(rows, directory):
                        ended_epoch=time.time(), consumed=False,
                        interpretation='Execution observation only; preserve tested conditions and live jobs.')
             atomic(p, rec)
-            # Preserve the existing append-only execution history. The same
-            # producer event is recorded once, regardless of poll/restart count.
             history = directory.parent / '.lemvo-jobs-history.jsonl'
             with history.open('a', encoding='utf-8') as stream:
                 stream.write(json.dumps({'ts': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
@@ -572,12 +662,10 @@ def reconcile(jobs_file, states_file, receipts, stamp_started_flag=False):
         if jobs is None:
             try:
                 if not p.read_text(encoding='utf-8').strip():
-                    jobs = []  # Legacy empty journal is an empty registration.
+                    jobs = []
             except OSError:
                 pass
         if jobs is None:
-            # A concurrent writer may be between writes. Persistent corruption
-            # still follows the existing CORRUPT path; no model is called here.
             time.sleep(.02)
             jobs = load(p, None)
         if not isinstance(jobs, list) or any(not isinstance(j, dict) for j in jobs):
@@ -587,17 +675,12 @@ def reconcile(jobs_file, states_file, receipts, stamp_started_flag=False):
     rows = [classify(j) for j in jobs]
     atomic(states_file, rows)
     publish(rows, receipts)
-    # A timeout/result is an event, not authority to discard the still-live
-    # producer identity. Its registration stays observable until it exits or the
-    # researcher explicitly updates the journal; we never terminate it here.
     active = [r['name'] or '?' for r in rows
               if r['status'] == 'running' or r.get('producer_alive')]
     if active:
         return 'EVENTS' if pending(receipts) else 'PENDING ' + ','.join(active)
     if not rows and pending(receipts):
-        return 'EVENTS'  # Restart still delivers receipts after the journal moved.
-    # Keep the all-terminal archival contract. The shell archives the complete
-    # journal, but write_receipts below is idempotent and never duplicates events.
+        return 'EVENTS'
     if any(r['status'] == 'timed_out' for r in rows):
         return 'TIMEOUT'
     if any(r['status'] in ('ended', 'failed', 'stale', 'unknown') for r in rows):

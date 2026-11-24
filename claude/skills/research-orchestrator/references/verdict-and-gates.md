@@ -8,7 +8,7 @@
 同一实现的连续调试可 resume；阶段、方法分支变化或上下文膨胀时，控制器可
 带当前任务包开启 fresh 会话。禁止“新会话 + 裸 continue”，不用 `--last`
 猜会话；会话轮换不重置授权、累计记录、当前指导或后台作业身份。
-参见[工作单元与上下文交接](references/work-units.md)。
+参见[工作单元与上下文交接](work-units.md)。
 
 **具体任务与结果交接**：本轮围绕任务包中的目标完成构思、代码、实验或分析，
 把有用结果接到下一项实际工作。可提供简短结构化结果；旧项目未提供时由运行时
@@ -74,14 +74,14 @@ ACTIVE"不得触发下一轮 continue；支线停止或 pivot 时**累计准备�
 ## 近邻存在 ≠ 否决（Neighbors are not a veto）
 
 **生成端消费机制内容**：调用构思技能时，把已有调研中的相关源操作、必要
-条件与代码随问题传入，按 [neighbor-to-method](../shared-references/neighbor-to-method.md)
+条件与代码随问题传入，按 [neighbor-to-method](../../shared-references/neighbor-to-method.md)
 把近邻作为父实现/构件，依据本任务条件生成实际适配；不要只传论文标题或
 先生成再送评。后续交接把这些内容与 concrete_change 一起送到实施端。现有
 construction_context.py 的可选 `--methods` 可直接转发选定机制笔记，不另建库。
 使用当前可得资料，不以来源数量或差异声明完整度阻塞构思与授权内开发。
 
 **从论文到方法**：收到论文种子并需要构思时，走 brainstorming 的
-[paper-to-method 入口](../shared-references/paper-to-method.md)，将原方法还原为
+[paper-to-method 入口](../../shared-references/paper-to-method.md)，将原方法还原为
 可改的信息/学习路径，再选具体设计动作；用现有候选记录把源机制、父实现、
 改动与最直接比较交给执行后端。构思请求不因“尚未成熟”默认送 idea-evaluator。
 单独发散先交付提案；已有执行授权和项目模式时按原模式继续，不另加批准环节。
@@ -101,7 +101,7 @@ construction_context.py 的可选 `--methods` 可直接转发选定机制笔记�
 
 **建设交接**：选定/修订候选后，把已有 source_refs、源方法必要条件、具体改动、
 父代码 commit 与有 scope 的结果一起交给实施端，别只转发标题。已有候选记录可用
-`../shared-references/scripts/construction_context.py` 只读渲染（JSON/Markdown 均可），
+`../../shared-references/scripts/construction_context.py` 只读渲染（JSON/Markdown 均可），
 把输出实际注入 Forge/Autoresearch 的工作上下文；小改动用两三句直接交接即可。
 外循环优先把观察转成可实施的子版本，保留有效父方法；没有可信修订可暂存，
 不强制无限修复。汇总先读同一候选范围的显式更正，不能让已撤回否决复活。
@@ -109,7 +109,7 @@ construction_context.py 的可选 `--methods` 可直接转发选定机制笔记�
 
 文献门/评审发现近邻或竞品**不是关闭课题的理由**，是触发 delta 声明的信号
 （缺口定位与跨域机制检索的构思接口见
-`../shared-references/grounded-ideation.md`，按需取用，不要求每次加载）：
+`../../shared-references/grounded-ideation.md`，按需取用，不要求每次加载）：
 
 - delta 声明四要件：**点名的最近邻** + **明确增量**（组合 A+B / 迁移新场景 /
   补齐缺失对照 / 机制解释，均合法）+ **机制故事** + **失败模式预期**。
@@ -161,6 +161,13 @@ research-state.yaml 的 supported / refuted / inconclusive 字段承担全部
   口径已预注册时（如轨迹宏平均），其他加权口径异号不否定主量——并报
   两口径并解释异质性/权重差异；仅口径未冻结时才防事后择优（记口径未定）。
   禁止挑一边写成"证明了负信号"。
+- **撤回/纠偏三处同步（Retraction Sync，REQUIRED）**：当已记账运行被证实存在
+  工程失效（`IMPLEMENTATION_INVALID`，例如自定义 collator 静默丢弃视觉模态张量
+  `pixel_values`/`image_grid_thw`、或自定义 `training_step` 在 `grad_accum` 下双除
+  loss），必须在同一轮内三处同步更正：（1）在 `logs/experiments.jsonl` 对应记录
+  标 `retracted: true`（或追加含该 `exp_id` 与 `retracted: true` 的更正条）；
+  （2）更新 `research-state.yaml` 中对应假说/指标结论；
+  （3）更新 `findings.md`，避免已撤回结果继续作为“方法家族阴性证据”触发误停。
 
 ## 探索许可与论文许可分离（双门制）
 

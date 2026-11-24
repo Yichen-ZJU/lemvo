@@ -124,9 +124,16 @@ Session files: `autoresearch.md`, `autoresearch.sh`, `autoresearch.jsonl`, `resu
 
 **方法改动的就地检查（按改动选择，不另起审查）**：修改权重、掩码、
 选择器、指标方向或调度语义时，用真实函数做能区分错误的廉价检查；已有测试或
-本次实际实验能覆盖时直接复用，不重复造夹具。双输入高低值反例适合这类方向性
-操作，不是每种代码改动的必做项。无关路径不重新核验，普通配置/文字改动不自动
-触发全量回归。检查失败修对应实现，不判方法家族失败；修复后只复查受影响行为。
+本次实际实验能覆盖时直接复用，不重复造夹具。**引入自定义 collator、自定义 `compute_loss`
+或 `Trainer.training_step` 封装时，提交耗时训练前必须加做两项微核验**：（1）实测 1 个
+真实训练 batch（CPU/单步即可），对照 SFT 基线确认多模态/关键输入张量（如视觉模型的
+`pixel_values`、`image_grid_thw`、attention mask 与 labels）悉数送达 `model(**inputs)`
+而未被 collator 静默丢弃；（2）在目标 `gradient_accumulation_steps` 下实测 1 微步并核对
+$\lambda=0$ 退化等价性，确认与基准 `Trainer.training_step` 梯度尺度一致（无额外 `/ grad_accum`
+双除缩水）。双输入高低值反例适合方向性权重/选择器操作，不是每种代码改动的必做项。
+无关路径不重新核验，普通配置/文字改动不自动触发全量回归。若微核验失败，修复对应实现并将
+历史误伤试次同步标记 `IMPLEMENTATION_INVALID` + `retracted: true`（同步 `logs/experiments.jsonl`、
+`research-state.yaml` 与 `findings.md`），不判方法家族失败；修复后只复查受影响行为。
 评测路径可信且改动可运行，就进入本轮真实实验；不为凑齐检查形式推迟执行。
 
 ### 4.4 Run（防上下文爆炸）

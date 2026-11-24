@@ -75,7 +75,7 @@ actual component and record the concrete change, without a new literature/review
 4. **契约随包**：把 `references/contract.md` 复制为 `<pkg>/references/contract.md`——任务包独立交付时
    执行方只读包内文件也能拿到权威契约（表头/循环边界/crash-revert/Guard/min_delta/日志命名/§8 层级）。
 5. 生成 `results.tsv` 表头。
-6. **冒烟测试**：亲自跑一次 baseline 确认链路通（这步省不得）。
+6. **冒烟测试**：亲自跑一次 baseline 确认链路通（这步省不得）。若候选采用自定义 data collator、`compute_loss` 或 `training_step` 封装，打包/开工前务必核对 1 个真实样本 batch 送入模型前后的模态张量键（对照 SFT 基线确认 `pixel_values`/`image_grid_thw` 等未被静默丢弃）及目标 `grad_accum` 下单微步梯度缩放与 $\lambda=0$ 退化一致性，问题试次按 `IMPLEMENTATION_INVALID` + `retracted: true` 三处同步撤回。
 7. 交付时告诉用户两条运行路线：
    - 单 agent：`/autoresearch`（或直接 `claude -p "Read program.md and execute"`）
 

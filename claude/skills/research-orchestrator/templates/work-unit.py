@@ -7,12 +7,12 @@ job, research verdict, user instruction, or authorization. Python 3.6+ stdlib.
 import argparse
 import datetime
 import hashlib
+import importlib.util
 import json
 import math
 import os
 from pathlib import Path
 import re
-import importlib.util
 import tempfile
 import time
 
@@ -92,8 +92,7 @@ def text(path, default=''):
         return default
 
 
-def scalar(raw):
-    """YAML scalar subset: quotes/comments respected; never guess units."""
+def _quote_state_before_comment(raw):
     s = raw.strip()
     quote, esc = None, False
     cut = len(s)
@@ -111,7 +110,12 @@ def scalar(raw):
         elif c == '#' and (i == 0 or s[i - 1].isspace()):
             cut = i
             break
-    s = s[:cut].strip()
+    return quote is not None, s[:cut].strip()
+
+
+def scalar(raw):
+    """YAML scalar subset: quotes/comments respected; never guess units."""
+    _, s = _quote_state_before_comment(raw)
     if len(s) >= 2 and s[0] == s[-1] and s[0] in ('"', "'"):
         if s[0] == '"':
             try:
@@ -123,9 +127,13 @@ def scalar(raw):
 
 
 def state_fields(path='research-state.yaml'):
-    """Only simple scalar navigation, not a replacement YAML state writer."""
+    """Scalar + YAML block ('>', '>-', '|', '|-') and multiline quoted navigation."""
     fields, stack = {}, []
-    for line in text(path).splitlines():
+    lines = text(path).splitlines()
+    idx, total_n = 0, len(lines)
+    while idx < total_n:
+        line = lines[idx]
+        idx += 1
         m = re.match(r'^( *)([A-Za-z_][\w-]*):(?:\s*(.*))?$', line)
         if not m:
             continue
@@ -133,8 +141,46 @@ def state_fields(path='research-state.yaml'):
         while stack and stack[-1][0] >= depth:
             stack.pop()
         keypath = '.'.join([s[1] for s in stack] + [key])
-        if raw.strip() and not raw.lstrip().startswith('#'):
-            fields[keypath] = scalar(raw)
+        stripped = raw.strip()
+        if re.match(r'^[|>][+-]?\d*(?:\s+#.*)?$', stripped):
+            indicator = stripped[0]
+            buf = []
+            while idx < total_n:
+                nxt = lines[idx]
+                nxt_s = nxt.strip()
+                nxt_depth = len(nxt) - len(nxt.lstrip(' '))
+                if nxt_s and nxt_depth <= depth:
+                    break
+                idx += 1
+                buf.append(nxt)
+            while buf and not buf[-1].strip():
+                buf.pop()
+            if indicator == '|':
+                nonempty = [len(b) - len(b.lstrip(' ')) for b in buf if b.strip()]
+                pad = min(nonempty) if nonempty else 0
+                resolved = '\n'.join(b[pad:] if len(b) >= pad else '' for b in buf).strip()
+            else:
+                resolved = ' '.join(b.strip() for b in buf if b.strip()).strip()
+            fields[keypath] = resolved or None
+            continue
+        if stripped and not stripped.startswith('#'):
+            unclosed, _ = _quote_state_before_comment(raw)
+            if unclosed:
+                buf = [stripped]
+                while idx < total_n:
+                    nxt = lines[idx]
+                    nxt_s = nxt.strip()
+                    nxt_depth = len(nxt) - len(nxt.lstrip(' '))
+                    if nxt_s and nxt_depth <= depth and re.match(r'^([A-Za-z_][\w-]*)\s*:', nxt_s):
+                        break
+                    idx += 1
+                    buf.append(nxt_s)
+                    still_open, _ = _quote_state_before_comment(' '.join(buf))
+                    if not still_open:
+                        break
+                fields[keypath] = scalar(' '.join(buf))
+            else:
+                fields[keypath] = scalar(raw)
         else:
             stack.append((depth, key))
     return fields
@@ -164,7 +210,6 @@ def policy():
 def excerpt(raw, limit):
     if len(raw) <= limit:
         return raw, False
-    # Keep both original context and latest scoped outcomes. Do not paraphrase.
     n = max(1, (limit - 100) // 2)
     return raw[:n] + '\n[EXCERPT: middle omitted; original file remains authoritative]\n' + raw[-n:], True
 
@@ -175,7 +220,6 @@ def file_record(path, max_chars=5000):
         st = p.stat()
         if not p.is_file():
             return None
-        # Hash scientific memory/metadata only, not arbitrarily large raw logs.
         if st.st_size <= 2 * 1024 * 1024:
             raw = p.read_bytes()
             digest = hashlib.sha256(raw).hexdigest()
@@ -184,8 +228,6 @@ def file_record(path, max_chars=5000):
             if p.name == 'research-state.yaml':
                 mod = _load_idle_module()
                 if mod is not None:
-                    # Ledger counters remain in the excerpt for honest budget
-                    # decisions, but do not masquerade as a scientific change.
                     scientific = mod.scientific_state_text(sample)
                     digest = hashlib.sha256(scientific.encode('utf-8')).hexdigest()
                     basis = 'scientific-state-content'
@@ -194,9 +236,6 @@ def file_record(path, max_chars=5000):
                 head = f.read(32768)
                 f.seek(max(0, st.st_size - 32768))
                 tail = f.read(32768)
-            # A sample alone misses equal-sized edits in the middle. Include
-            # filesystem change times and label this as a stat/sample hint,
-            # never a full content SHA guarantee.
             stat_stamp = '%s:%s:%s' % (st.st_size,
                 getattr(st, 'st_mtime_ns', int(st.st_mtime * 1000000000)),
                 getattr(st, 'st_ctime_ns', int(st.st_ctime * 1000000000)))
@@ -221,8 +260,26 @@ def jobs_context():
         if not isinstance(r, dict):
             continue
         rows.append({k: r[k] for k in ('run_id', 'name', 'status', 'pid', 'pid_start',
-                                      'host', 'done_file', 'result_file') if k in r})
+                                      'host', 'done_file', 'result_file', 'result_path') if k in r})
     return rows
+
+
+def pending_receipts_context(max_items=10):
+    d = Path('.lemvo-receipts')
+    if not d.is_dir():
+        return []
+    out = []
+    for p in sorted(d.glob('*.json')):
+        obj = load(p)
+        if not isinstance(obj, dict) or obj.get('consumed', True):
+            continue
+        item = {k: obj.get(k) for k in ('name', 'run_id', 'status', 'exit_code',
+                                        'done_file', 'result_file', 'metrics', 'result')
+                if obj.get(k) is not None}
+        out.append(item)
+        if len(out) >= max_items:
+            break
+    return out
 
 
 def skill_paths(kind):
@@ -250,8 +307,6 @@ def bounded_handoff(last):
     raw = json.dumps(selection, ensure_ascii=False)
     if len(raw) <= 10000:
         return raw
-    # Keep the machine record intact on disk. Project only the changed task and
-    # explicit scope, never turn a huge evidence table into an invented verdict.
     small = {k: selection[k] for k in ('turn_id', 'status', 'next_task', 'source') if k in selection}
     small['summary_excerpt'], _ = excerpt(str(selection.get('summary', '')), 3000)
     small['evidence_scope_excerpt'], _ = excerpt(str(selection.get('evidence_scope', '')), 1000)
@@ -261,22 +316,12 @@ def bounded_handoff(last):
 
 
 def guidance_first_line(raw):
-    """Index real guidance, never the queue's HTML metadata or receipt header.
-
-    All original instructions remain preserved verbatim by prepare(). This is
-    only a faithful task index, not a natural-language instruction resolver.
-    Supersession is already resolved by the controller's frozen snapshot.
-    """
-    # In a legacy combined receipt+steer input, a queue marker identifies the
-    # beginning of actual guidance. Do not read the preceding job receipt as a
-    # user instruction. The controller normally supplies the steer-only file.
+    """Index real guidance, never the queue's HTML metadata or receipt header."""
     markers = list(re.finditer(r'<!--\s*message_id\s*:', raw, re.I))
     if markers:
-        # Frozen snapshot order is authoritative. Index the latest delivered
-        # message, while prepare preserves all still-active guidance verbatim.
         raw = raw[markers[-1].start():]
     raw = re.sub(r'<!--.*?-->', '', raw, flags=re.S)
-    raw = re.sub(r'<!--[^\n]*', '', raw)  # incomplete single-line metadata
+    raw = re.sub(r'<!--[^\n]*', '', raw)
     for line in raw.splitlines():
         line = line.strip()
         if not line or re.match(r'^[-=_*]{3,}\s*$', line):
@@ -288,9 +333,8 @@ def guidance_first_line(raw):
         if (line.startswith('以下后台作业已出结果') or
                 line.lower().startswith(('background job receipts', 'runtime receipt'))):
             continue
-        if re.match(r'^[-*]\s+.*\b(?:status|run_id|exit_code|done_file)\s*=', line):
+        if re.match(r'^[-*]\s+.*\b(?:status|run_id|exit_code|done_file|result_file)\s*=', line):
             continue
-        # Skip a bare queue envelope label, not arbitrary user sentences.
         if re.match(r'^(?:Current (?:user )?guidance|User (?:message|guidance)|用户指导|当前指导)\s*[:：]?$', line, re.I):
             continue
         line = re.sub(r'^[-*]\s+', '', line)
@@ -299,7 +343,6 @@ def guidance_first_line(raw):
 
 
 def request_context_tokens(context):
-    # Total usage across a CLI invocation or session is NOT context length.
     observation = context.get('last_request_context')
     if isinstance(observation, dict) and observation.get('scope') == 'per_request':
         n = observation.get('input_tokens')
@@ -371,32 +414,44 @@ def choose_session(previous, current_sid, engine, phase, branch, p):
     return 'resume', 'same-working-unit'
 
 
+def _planned_next_task(fields, last):
+    requested = last.get('next_task') if isinstance(last, dict) else None
+    if isinstance(requested, dict) and requested.get('objective'):
+        obj = str(requested['objective']).strip()
+        if obj and obj.lower() not in ('wait', 'waiting', 'idle', 'none'):
+            return obj, 'previous-work-result.next_task', requested.get('kind')
+    objective = first(fields, ['prep.next_min_probe', 'next_min_probe', 'research_plan.next_action',
+                               'research_plan.next_task', 'next_action'])
+    if objective and str(objective).strip().lower() not in ('wait', 'waiting', 'idle', 'none'):
+        return str(objective).strip(), 'research-state.yaml', None
+    return None, None, None
+
+
 def next_task(fields, source, last):
     if os.environ.get('LEMVO_MESSAGE_KIND') == 'user':
         original = os.environ.get('LEMVO_CURRENT_MESSAGE_PATH')
         raw = text(original).strip() if original else ''
         if raw:
-            # A faithful first line is an index, not a paraphrase. Full new
-            # instructions remain in the preserved input, including long steer.
             line = guidance_first_line(raw)
             if line:
                 return line, 'current-user-message: ' + original, None
     was_waiting = isinstance(last, dict) and last.get('status') == 'waiting'
+    planned_obj, planned_src, planned_kind = _planned_next_task(fields, last)
     if was_waiting and ((source and text(source).strip()) or os.environ.get('LEMVO_RESOURCE_WAKE')):
-        # A genuine new event gets a new work packet. Do not copy the old
-        # waiting worker's free-form "next_task" back as another idle task.
+        if planned_obj:
+            wake_tag = os.environ.get('LEMVO_RESOURCE_WAKE') or 'runtime-event'
+            chosen_kind = planned_kind or ('experiment' if planned_src == 'research-state.yaml' else 'research')
+            return (
+                'Incorporate %s results/event updates and execute or adapt planned task: %s' % (wake_tag, planned_obj),
+                'runtime-event+' + planned_src,
+                chosen_kind,
+            )
         return ('Process the newly delivered runtime event or changed scientific sources; '
                 'read the actual new result once, preserve completed work, and select '
                 'the next concrete authorized research action or register its real dependency.',
                 'new-runtime-event-after-wait', 'analysis')
-    requested = last.get('next_task') if isinstance(last, dict) and not was_waiting else None
-    if isinstance(requested, dict) and requested.get('objective'):
-        return str(requested['objective']), 'previous-work-result.next_task', requested.get('kind')
-    objective = first(fields, ['prep.next_min_probe', 'next_min_probe', 'research_plan.next_action',
-                               'research_plan.next_task', 'next_action'])
-    if objective:
-        return str(objective), 'research-state.yaml', None
-    # Do not call a runtime boilerplate paragraph the user's concrete objective.
+    if planned_obj:
+        return planned_obj, planned_src, planned_kind
     objective = first(fields, ['project.objective', 'project.question', 'objective', 'question'])
     if objective:
         return str(objective), 'research-state.yaml project objective', None
@@ -417,7 +472,8 @@ def prepare(td, source, target, engine='codex', session_file='.autoloop-session-
     previous = load(CONTEXT, {})
     previous = previous if isinstance(previous, dict) else {}
     fields, p = state_fields(), policy()
-    phase = first(fields, ['research_plan.stage', 'project.phase', 'phase', 'stage'], '')
+    phase = first(fields, ['research_plan.stage', 'campaign.phase', 'project.phase',
+                           'current_phase', 'phase', 'stage'], '')
     branch = first(fields, ['research_plan.method_branch', 'research_plan.branch',
                             'project.method_branch', 'method_branch'], '')
     last = load(LAST_RESULT, {})
@@ -439,6 +495,7 @@ def prepare(td, source, target, engine='codex', session_file='.autoloop-session-
         or strategy.get('latest_failure_taxonomy')
     ))
     jobs = jobs_context()
+    pending_receipts = pending_receipts_context()
     was_waiting = isinstance(last, dict) and last.get('status') == 'waiting'
     active_job_running = any(
         str(j.get('status') or '').lower() in ('running', 'pending', 'queued', 'active')
@@ -469,9 +526,13 @@ def prepare(td, source, target, engine='codex', session_file='.autoloop-session-
         )
         if p['mode'] != 'resume':
             action, reason = 'fresh', 'macro-review-plateau'
+    candidate_files = ['CHARTER.md', 'research-state.yaml', 'STATE.md', 'findings.md',
+                       'research-log.md', 'prompt.txt']
+    for extra_name in ('current_protocol.md', '.lemvo-portfolio.json', 'logs/experiments.jsonl', 'results.tsv'):
+        if extra_name not in candidate_files and Path(extra_name).is_file():
+            candidate_files.append(extra_name)
     files = []
-    for name in ('CHARTER.md', 'research-state.yaml', 'STATE.md', 'findings.md',
-                 'research-log.md', 'prompt.txt'):
+    for name in candidate_files:
         f = file_record(name, p['file_excerpt_chars'])
         if f:
             files.append(f)
@@ -490,6 +551,8 @@ def prepare(td, source, target, engine='codex', session_file='.autoloop-session-
             'relevant_skill_paths': rel_skills,
             'previous_result': '.lemvo-last-work-result.json' if last else None,
             'result_path': str(td / 'work-result.json')}
+    if pending_receipts:
+        task['delivered_receipts'] = pending_receipts
     if has_strategy_data:
         atomic(td/'strategy-snapshot.json', strategy)
         incubating = [
@@ -498,6 +561,7 @@ def prepare(td, source, target, engine='codex', session_file='.autoloop-session-
         ]
         strategy_summary = {
             'completed_experiments': strategy.get('completed_experiments', 0),
+            'retracted_experiments': strategy.get('retracted_experiments', 0),
             'incremental_streak': strategy.get('incremental_streak', 0),
             'streak_since_last_review': strategy.get('streak_since_last_review', 0),
             'macro_review_threshold': strategy.get('macro_review_threshold', 0),
@@ -506,6 +570,7 @@ def prepare(td, source, target, engine='codex', session_file='.autoloop-session-
             'macro_review_advisory': macro_review_advisory,
             'tier_counts': strategy.get('tier_counts', {}),
             'duplicate_warnings_count': len(strategy.get('duplicate_warnings') or []),
+            'unreadable_result_warnings_count': len(strategy.get('unreadable_result_warnings') or []),
             'incubating_families': incubating,
         }
         if deferred_objective:
@@ -533,6 +598,9 @@ def prepare(td, source, target, engine='codex', session_file='.autoloop-session-
         'Read original files when needed; fingerprints identify unchanged sources, not a prohibition on reading. '
         'No excerpt or summary grants permission absent from its source.' % (action, reason),
     ]
+    if pending_receipts:
+        parts.append('DELIVERED JOB RECEIPTS (actual producer outputs; revise or keep planned next task accordingly):\n' +
+                     json.dumps(pending_receipts, ensure_ascii=False)[:6000])
     if action == 'fresh':
         for f in files:
             parts.append('PROJECT SOURCE %s [fingerprint %s; %s; %s]\n%s' %
@@ -546,13 +614,21 @@ def prepare(td, source, target, engine='codex', session_file='.autoloop-session-
                      'Use current relevant sections; avoid rereading unchanged whole papers, logs and role guides merely to resume.' %
                      (', '.join(changed) or '(none among tracked memory files)'))
     if isinstance(last, dict) and last:
-        # This is a machine projection, never a model paraphrase of old verdicts.
         parts.append('Previous work handoff (retain conditions; not a scientific verdict):\n' + bounded_handoff(last))
     parts.append('At completion, optionally write %s as JSON with status, summary, artifact_refs, '
                  'metrics (only actually observed values with their conditions), and next_task {kind, objective}. '
                  'Partial/waiting work is valid. Missing JSON is compatible and does not stop the campaign. '
                  'Do not copy raw training logs into chat; keep full logs on disk and return changed metrics or a necessary error excerpt plus paths.' % (td/'work-result.json'))
     if has_strategy_data and smod is not None:
+        unreadable = strategy.get('unreadable_result_warnings') or []
+        if unreadable:
+            parts.append('STRATEGY EXTRACTION WARNING: %d completed experiment row(s) had unreadable metrics: %s' % (
+                len(unreadable),
+                ', '.join('%s(result_keys=%s)' % (u['exp_id'], u.get('result_keys') or []) for u in unreadable[:4]),
+            ))
+        retracted = strategy.get('retracted_ids') or []
+        if retracted:
+            parts.append('RETRACTION SYNC NOTICE: The following runs are marked retracted/invalidated in the ledger and must NOT be cited as settled mechanism negatives: %s' % ', '.join(retracted))
         if macro_review_active:
             parts.append(
                 'MACRO REVIEW GATE TRIGGERED (streak_since_last_review=%d/%d, total_streak=%d): '
@@ -610,7 +686,6 @@ def last_answer(path, limit=6000):
 
 
 def clean_result(obj, td, rc):
-    # Preserve scoped statements verbatim rather than manufacturing a verdict.
     status = obj.get('status')
     if status not in VALID_STATUS:
         status = 'unknown'
@@ -702,15 +777,15 @@ def order_key(order):
     if stamp is None:
         return None
     tie = numeric_epoch(order.get('tie_break_epoch'))
-    return (stamp, tie if tie is not None else stamp, str(order.get('turn_id', '')))
+    return (stamp, tie if tie is not None else stamp, str(order.get('turn_id') or ''))
 
 
 def existing_order(record, context=False):
-    if not isinstance(record, dict):
+    if not isinstance(record, dict) or not record:
         return None
-    order = record.get('dispatch_order')
-    if order_key(order) is not None:
-        return order
+    recorded = record.get('dispatch_order')
+    if isinstance(recorded, dict) and numeric_epoch(recorded.get('started_epoch')) is not None:
+        return recorded
     tid = record.get('last_settled_turn' if context else 'turn_id')
     if tid and Path('turns', str(tid)).is_dir():
         return dispatch_order(Path('turns', str(tid)))
@@ -740,7 +815,6 @@ def settle(td, rc=0, session_file='.autoloop-session-id'):
     current_key = order_key(order)
     stale = (latest_key is not None and current_key is not None and current_key < latest_key)
     old = load(td/'work-result.json')
-    # A module-produced record may already exist after interruption/recovery.
     result = clean_result(old, td, rc) if isinstance(old, dict) else None
     if result is None:
         progress = load(td/'progress.json', {}) or {}
@@ -752,8 +826,8 @@ def settle(td, rc=0, session_file='.autoloop-session-id'):
         result = clean_result({'status': status, 'summary': summary or
                               ('Runtime completed; inspect referenced artifacts for research conclusions.' if not rc else
                                'Execution did not complete; this is not evidence against a scientific hypothesis.'),
-                               'artifact_refs': changed + [str(td/'result.json'), str(td/'progress.json')],
-                               'metrics': [], 'limitations': ['No explicit structured research result; metrics remain unknown.']}, td, rc)
+                              'artifact_refs': changed + [str(td/'result.json'), str(td/'progress.json')],
+                              'metrics': [], 'limitations': ['No explicit structured research result; metrics remain unknown.']}, td, rc)
         result['source'] = 'runtime-compatible-fallback'
         result['summary_source'] = str(td/'engine-stdout.jsonl') if summary else 'runtime-facts'
     if rc:
@@ -770,7 +844,6 @@ def settle(td, rc=0, session_file='.autoloop-session-id'):
                                         'promoted': False, 'reason': 'older-dispatch',
                                         'dispatch_order': order, 'recorded_utc': now()})
         return result
-    # Failed work is retained per-turn but must not replace successful handoff.
     if rc == 0:
         atomic(LAST_RESULT, result)
         if context.get('last_settled_turn') != td.name:
@@ -798,7 +871,7 @@ def settle(td, rc=0, session_file='.autoloop-session-id'):
                 atomic(td/'work-result.json', result)
                 atomic(LAST_RESULT, result)
         atomic(td/'work-settlement.json', {'successful': True, 'turn_id': td.name,
-                                        'recorded_utc': now()})
+                                        'promoted': True, 'recorded_utc': now()})
         if plan.get('macro_review_triggered') or plan.get('macro_review_advisory'):
             smod = _load_strategy_module()
             if smod is not None:

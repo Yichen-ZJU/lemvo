@@ -300,8 +300,10 @@ consume_receipts_snapshot() {  # 未消费回执 → 合并消息路径；只取
     python3 - "$r" >> "$out" <<'PYC'
 import json, sys
 r = json.load(open(sys.argv[1]))
-print("- %s: status=%s run_id=%s exit_code=%s done_file=%s (run 事实；请读结果、改方法、继续；勿重跑同 run_id)" % (
-    r.get("name"), r.get("status"), r.get("run_id"), r.get("exit_code"), r.get("done_file")))
+rf = r.get("result_file")
+rf_note = (" result_file=%s" % rf) if rf else ""
+print("- %s: status=%s run_id=%s exit_code=%s done_file=%s%s (run 事实；请读结果、改方法、继续；勿重跑同 run_id)" % (
+    r.get("name"), r.get("status"), r.get("run_id"), r.get("exit_code"), r.get("done_file"), rf_note))
 # Reuse already parsed producer fields. Do not guess metrics from log text,
 # change units, or treat missing values as zero.
 payload = {"metrics": r.get("metrics"), "result": r.get("result")}

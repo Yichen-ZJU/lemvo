@@ -4,12 +4,14 @@
 Adopts a live CLI; a stream result is NOT process exit. Once it really exits,
 producer terminal events wake the same session exactly once. No metric, method,
 team, seed, scientific stop or promotion policy belongs in this module.
+Python 3.6+ stdlib only.
 """
 from pathlib import Path
 import argparse
 import datetime
 import fcntl
 import hashlib
+import importlib.util
 import json
 import os
 import re
@@ -22,6 +24,12 @@ try:
 except (AttributeError, OSError):
     BOOT_EPOCH = time.time() - float(Path('/proc/uptime').read_text().split()[0])
 TICKS_PER_SECOND = os.sysconf('SC_CLK_TCK')
+
+_HARD_STATUSES = frozenset(('STOP', 'STOPPED', 'PAUSED'))
+_HUMAN_STATUSES = frozenset(('WAITING_USER', 'HOLD', 'EVIDENCE_HOLD', 'STOPPED_INCONCLUSIVE',
+                             'BLOCKED', 'BLOCKED_USER', 'BLOCKED-USER'))
+_DONE_STATUSES = frozenset(('COMPLETED', 'CONCLUDED', 'CAMPAIGN_DONE', 'CAMPAIGN-DONE'))
+_INVALID_CAP_SOURCES = frozenset(('', 'unknown', 'none', 'null', '-', 'n/a'))
 
 
 def read(path, default=None):
@@ -92,6 +100,97 @@ def tail_session_id(path):
     return None
 
 
+def _load_runtime_contract():
+    p = Path(__file__).with_name('runtime-contract.py')
+    if not p.is_file():
+        return None
+    try:
+        spec = importlib.util.spec_from_file_location('_lemvo_owner_contract', str(p))
+        mod = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(mod)
+        return mod
+    except Exception:
+        return None
+
+
+def _parse_budget_yaml(state_path):
+    out = {}
+    if not state_path.is_file():
+        return out
+    top = ''
+    try:
+        lines = state_path.read_text(encoding='utf-8', errors='replace').splitlines()
+    except OSError:
+        return out
+    for raw in lines:
+        line = re.sub(r'\s+#.*$', '', raw).rstrip()
+        m = re.match(r'^(\s*)([A-Za-z_][\w-]*)\s*:\s*(.*)$', line)
+        if not m:
+            continue
+        indent, key, val = len(m.group(1)), m.group(2), m.group(3).strip().strip('"\'')
+        if indent == 0:
+            top = key
+        elif top == 'budget' and indent == 2:
+            out[key] = val
+    return out
+
+
+def _budget_exhausted(root):
+    b = _parse_budget_yaml(root / 'research-state.yaml')
+    if b.get('unit', '').strip().lower() != 'usd':
+        return False
+    auth = b.get('cap_authorized', '').strip().lower()
+    src = b.get('cap_source', '').strip().lower()
+    if auth != 'yes' or src in _INVALID_CAP_SOURCES:
+        return False
+    try:
+        cap = float(b.get('total_cap', ''))
+        used = float(b.get('used', ''))
+    except (ValueError, TypeError):
+        return False
+    return used >= cap
+
+
+def _contract_state(root):
+    """Inspect WAIT/HARD/DONE/HUMAN status consistently with runtime-contract.py."""
+    state_path = root / 'research-state.yaml'
+    statuses = set()
+    if state_path.is_file():
+        top = ''
+        try:
+            lines = state_path.read_text(encoding='utf-8', errors='replace').splitlines()
+        except OSError:
+            lines = []
+        for raw in lines:
+            line = re.sub(r'\s+#.*$', '', raw).rstrip()
+            m = re.match(r'^(\s*)([\w-]+)\s*:\s*(.*)$', line)
+            if not m:
+                continue
+            indent, key, val = len(m.group(1)), m.group(2), m.group(3).strip().strip("'\"").upper()
+            if not indent:
+                top = key
+                if key in ('campaign_status', 'measurement_state', 'root_status', 'status') and val:
+                    statuses.add(val)
+            elif indent == 2 and top == 'project' and key == 'status' and val:
+                statuses.add(val)
+    markers = {n for n in ('STOP', 'HOLD', 'BLOCKED-USER', 'CAMPAIGN-DONE') if (root / n).is_file()}
+    values = statuses | markers
+    if values & _HARD_STATUSES or (root / 'PAUSE').is_file() or (root / '.runtime-events/PAUSE').is_file():
+        return 'hard', '|'.join(sorted(values & _HARD_STATUSES)) or 'PAUSE'
+    if values & _DONE_STATUSES:
+        return 'done', '|'.join(sorted(values & _DONE_STATUSES))
+    if values & _HUMAN_STATUSES:
+        return 'human', '|'.join(sorted(values & _HUMAN_STATUSES))
+    return 'ready', 'ready'
+
+
+def _has_eligible_guidance(root):
+    qdir = root / '.lemvo-steer-queue'
+    if not qdir.is_dir():
+        return False
+    return any(True for _ in qdir.glob('q-*.md'))
+
+
 def terminal(job):
     """A terminal observation, NEVER a scientific-success determination."""
     marks = []
@@ -106,8 +205,6 @@ def terminal(job):
             p = Path(name)
             try:
                 st = p.stat()
-                # A previous failed attempt may reuse this same marker path.
-                # It cannot terminate a newly alive producer's event wait.
                 if not job.get('accept_cached_markers') and st.st_mtime < producer_started:
                     continue
                 if (job.get('done_format') == 'json' or
@@ -121,7 +218,7 @@ def terminal(job):
                                  'scheduled', 'submitted') for key in ('status', 'state')):
                             continue
                     except (OSError, ValueError, UnicodeError):
-                        continue  # A live producer may still be publishing its result.
+                        continue
                 found.append([str(p), st.st_mtime_ns, st.st_size])
             except OSError:
                 pass
@@ -188,6 +285,33 @@ class Owner:
              dict(pid=os.getpid(), state=phase, at=time.time(),
                   cli=self.cli, session_id=self.state.get('session_id')))
 
+    def dispatch_blocked(self, wake=None):
+        """Enforce WAIT/HOLD/BLOCKED-USER, guided mode, and authorized USD cap pre-dispatch."""
+        if self.stopped():
+            return 'owner_paused_no_further_dispatch', 'stop_or_pause_file'
+        kind, reason = _contract_state(self.root)
+        if kind in ('hard', 'done'):
+            return 'owner_paused_no_further_dispatch', reason
+        adv_file = self.root / '.lemvo-advance-once'
+        user_wake = (
+            adv_file.is_file()
+            or _has_eligible_guidance(self.root)
+            or (isinstance(wake, dict) and str(wake.get('reason') or '') in ('user-advance', 'advance'))
+        )
+        if kind == 'human' and not user_wake:
+            return 'waiting_user', reason
+        mode_file = self.root / '.lemvo-mode'
+        if mode_file.is_file():
+            try:
+                mode_val = mode_file.read_text(encoding='utf-8').strip().lower()
+            except OSError:
+                mode_val = ''
+            if mode_val == 'guided' and not user_wake:
+                return 'waiting_user', 'guided-idle'
+        if _budget_exhausted(self.root):
+            return 'over_budget', 'authorized_usd_budget_exhausted'
+        return None
+
     def science_fingerprint(self):
         """Bounded stat-only change detection; excludes telemetry/weights/images."""
         paths = []
@@ -199,7 +323,6 @@ class Owner:
         for pattern in ['USER*.md', 'task/*.md', 'teams/**/*.md',
                         'reports/**/*', 'champion/*', '*.py', '*.sh', '*.yaml', '*.yml', '*.toml']:
             paths.extend(p for p in self.root.glob(pattern) if p.is_file())
-        # Actual source/results changes matter; recurring log/heartbeat growth does not.
         allowed = {'.py', '.sh', '.md', '.yaml', '.yml', '.toml'}
         for base in self.root.glob('agents/*/workspace'):
             seen = 0
@@ -242,7 +365,6 @@ class Owner:
                 j = read(p)
                 if not isinstance(j, dict):
                     continue
-                # These can be stale even when status="running". Only adopt live exact PID.
                 for key in ('driver_pid', 'pid'):
                     x = identity(j.get(key))
                     if not x or x['state'] in ('Z', 'X') or x['uid'] != os.getuid():
@@ -328,8 +450,6 @@ class Owner:
         if not isinstance(entry, dict):
             entry = {}
         if not alive(entry):
-            # A wrapper can die while its actual CLI survives. Adopt the owned,
-            # same-workspace CLI instead of starting a second model process.
             for path in Path('/proc').iterdir():
                 if not path.name.isdigit():
                     continue
@@ -355,7 +475,6 @@ class Owner:
             self.state['session_id'] = (valid_session_id(entry.get('session_id')) or
                                         valid_session_id(self.state.get('session_id')) or
                                         tail_session_id(self.cli['stdout']))
-            # Never parse old terminal records as a NEW invocation result.
             try:
                 self.state['offset'] = Path(self.cli['stdout']).stat().st_size
             except OSError:
@@ -415,9 +534,6 @@ class Owner:
                            cli=self.cli)
                 if (j.get('subtype') == 'success' and not j.get('is_error') and
                         not j.get('parent_tool_use_id')):
-                    # Parent turn success acknowledges its event delivery even
-                    # when persistent native Monitor keeps this CLI alive.
-                    # This is NOT an OS exit and does not cause another launch.
                     self.acknowledge_delivery()
             message = j.get('message', {})
             if not isinstance(message, dict):
@@ -433,17 +549,17 @@ class Owner:
                         self.useful = True
 
     def spawn(self, reason, events=None, wake=None):
-        if self.stopped():
-            self.status('owner_paused_no_further_dispatch')
+        blocked = self.dispatch_blocked(wake=wake)
+        if blocked:
+            phase, fault = blocked
+            self.event('dispatch_blocked', reason=reason, phase=phase, fault=fault)
+            self.status(phase, fault=fault)
             return
         if self.child is not None and self.child.poll() is None:
             return
-        # Adopt first, even if a previous process exited between observations.
         if self.adopt():
             return
         sid = valid_session_id(self.state.get('session_id'))
-        # Delivery is acknowledged only after a successful actual CLI invocation,
-        # not before Popen. A crash or failed launch cannot silently eat an event.
         if events or wake:
             self.state['pending_delivery'] = dict(reason=reason, events=events or [],
                                                   wake=wake, at=time.time())
@@ -509,8 +625,6 @@ class Owner:
                 if self.engine == 'claude' and configured.returncode == 0 and settings.is_file():
                     args += ['--settings', str(settings)]
             except (OSError, subprocess.TimeoutExpired) as error:
-                # A malformed existing project configuration is preserved by the
-                # installer. Hook setup must never impose a research admission gate.
                 self.event('runtime_hooks_configuration_warning', error=type(error).__name__)
         env = os.environ.copy()
         if self.engine == 'claude':
@@ -534,6 +648,12 @@ class Owner:
             self.status('cpu_backoff' if retries <= 3 else 'runtime_fault',
                         fault='cli_launch_failed')
             return
+        adv_file = self.root / '.lemvo-advance-once'
+        if adv_file.is_file():
+            try:
+                adv_file.unlink()
+            except OSError:
+                pass
         x = identity(self.child.pid)
         self.cli = dict(pid=self.child.pid, start=x['start'] if x else None, stdout=str(stdout))
         entry = dict(self.cli, session_id=sid, engine=self.engine,
@@ -555,11 +675,9 @@ class Owner:
             word in lower for word in ('quota', 'limit', '1308', '额度', '上限'))
         if not hit:
             return None
-        # Prefer the previously maintained provider parser, if deployed locally.
         helper = self.runtime / 'quota_runtime.py'
         if helper.exists():
             try:
-                import importlib.util
                 spec = importlib.util.spec_from_file_location('project_quota_runtime', helper)
                 module = importlib.util.module_from_spec(spec)
                 spec.loader.exec_module(module)
@@ -571,16 +689,12 @@ class Owner:
         match = re.search(r'(?:reset_at|reset_not_before_epoch)[\s\":=]+(\d{10}(?:\.\d+)?)', text)
         if match:
             return max(time.time() + 10, float(match.group(1)) + 10)
-        # Unknown provider reset: CPU backoff, never an API status probe.
         return time.time() + 1800
 
     def stopped(self):
         return any((self.root / name).exists() for name in ('PAUSE', 'STOP', 'CAMPAIGN-DONE')) or (self.runtime / 'PAUSE').exists()
 
     def run(self):
-        # Shared with lemvo-run.sh: only one dispatcher may own this project.
-        # Python opens the FD non-inheritable; detached CLI children never keep
-        # the execution lease after their owner exits.
         with (self.runtime / 'execution-owner.lock').open('a+') as common:
             try:
                 fcntl.flock(common, fcntl.LOCK_EX | fcntl.LOCK_NB)
@@ -645,21 +759,22 @@ class Owner:
                         wait_intent = bool(re.search(
                             r'quiet|wait|await|turn ended|ending turn|in.flight|等待|待.*完成',
                             last.lower()))
-                        active = any(terminal(j) is None for j in jobs)
                         event_pending = bool(self.pending_terminals(jobs) or self.pending_wake())
                         if (self.useful or changed) and not wait_intent and not event_pending:
                             self.state['handoff_repair_used'] = False
                             self.spawn('native_work_handoff')
                             continue
-                        # This invocation itself was one genuine handoff opportunity.
-                        # A pure wait/QUIET response never justifies another paid
-                        # "repair the wait" invocation without an external event.
                         self.state['handoff_repair_used'] = True
                     idle_fp = self.science_fingerprint()
                     self.status('waiting_event', idle_fingerprint=idle_fp)
+                wake = self.pending_wake()
+                blocked = self.dispatch_blocked(wake=wake)
+                if blocked:
+                    self.status(blocked[0], fault=blocked[1])
+                    time.sleep(self.poll)
+                    continue
                 retry = float(self.state.get('retry_not_before', 0))
                 if self.state.get('failure_retries', 0) > 3:
-                    wake = self.pending_wake()
                     changed = self.science_fingerprint() != idle_fp
                     if not wake and not changed:
                         self.status('runtime_fault', fault='bounded_runtime_retries_exhausted')
@@ -681,7 +796,6 @@ class Owner:
                     self.spawn(delivery['reason'], delivery.get('events'), delivery.get('wake'))
                     continue
                 events = self.pending_terminals(jobs)
-                wake = self.pending_wake()
                 if events or wake:
                     self.state['handoff_repair_used'] = False
                     self.state['retry_not_before'] = 0

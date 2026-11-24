@@ -1,6 +1,6 @@
 # Experiment Loop Contract (single source of truth)
 
-Version: 2.3 · 2026-11-24 (v2.3 adds §8 Intervention Tiers T0-T3, Noise-Band Separation & Incubation Protection; retains r29 A4/A6/A7)
+Version: 2.4 · 2026-11-24 (v2.4 adds custom collator/trainer tensor & grad-accum scaling parity micro-check and retraction sync; retains v2.3 §8 Tiers T0-T3 & r29 A4/A6/A7)
 Owner: `experiment-forge` generates task packages; `autoresearch` executes
 the loop. **优先级范围**：本契约只对**包内技术约定**（results.tsv schema、
 日志命名、局部循环规则、crash/guard/min_delta 协议）是单一来源——这些与
@@ -146,4 +146,5 @@ Columns:
 - **干预层级（T0–T3）**：在 `autoresearch.jsonl` / `logs/experiments.jsonl` 显式记录 `intervention_tier`（`T0` 复现/倍步、`T1` 参数/权重/正则小调、`T2` 新机制/新数据或推理结构、`T3` 架构或范式重构）与 `family_id`；`results.tsv` 第 8 列 `move` 支持 `incubate` 与 `leap`。
 - **小正信号保留 ≠ 重置平台期**：按 §6 保留噪声带内的同向小正信号（r29 A7），但其 **不重置** `T0/T1` 增量平台期计数；连续 `T0`/`T1` 未突破噪声带（或未见置信区间排除 0 的跃升）达到策略阈值时，必须触发错例根因分析 + `escalate`/`leap`，而不是无休止拧参数。
 - **新机制成长期保护（Incubation）**：标记 `move=incubate` / `leap` 的新 `T2`/`T3` 机制前 2–3 轮享有保护期（可在独立探索分支/槽位演进）：首版粗糙实现若低于精调老 champion 但工程可运行且诊断信号朝目标改善，不得在首次跑分即永久淘汰整个方法家族。
+- **自定义 Collator / Trainer 等价微核验**：引入自定义 data collator、自定义损失或梯度累积封装时，启动 GPU 正式训练前必须在 1 个真实样本 batch 与目标 `grad_accum` 单微步上核验：（a）所有基线模态张量（如 `pixel_values`、`image_grid_thw`、mask/labels）完整到达 `model(**inputs)`；（b）梯度/loss 缩放与基线 `Trainer.training_step` 及 $\lambda=0$ 退化行为一致（无双重 `/ grad_accum` 缩放）。若追溯发现历史实验违反本条，须在 `logs/experiments.jsonl`、`research-state.yaml` 与 `findings.md` 同步标记 `IMPLEMENTATION_INVALID` + `retracted: true`。
 - **禁止配置重跑浪费**：提交昂贵实验前先跑 `research-strategy.py check-dup`，确认与历史有效配置不重复后再启动。

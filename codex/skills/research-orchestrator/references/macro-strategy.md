@@ -1,6 +1,6 @@
-# Macro Strategy & Anti-Incrementalism Protocol (Lemvo v2.1)
+# Macro Strategy & Anti-Incrementalism Protocol (Lemvo v2.2)
 
-当实验陷入局部微调平台期时，继续依靠“最小改动 + 单步接力”会在同一方法家族里反复消耗预算。本协议把**干预层级、噪声带隔离、正交探索保护与错例第一性原理诊断**接入主控工作单元（`templates/research-strategy.py` 与 `templates/work-unit.py`）。
+当实验陷入局部微调平台期时，继续依靠“最小改动 + 单步接力”会在同一方法家族里反复消耗预算。本协议把**干预层级、可比指标锚点、噪声带隔离、正交探索保护、结构化家族闭环与错例第一性原理诊断**接入主控工作单元（`templates/research-strategy.py` 与 `templates/work-unit.py`）。
 
 ## 1. 干预层级（Intervention Tiers: `T0`–`T3`）
 
@@ -16,10 +16,10 @@
 ## 2. 噪声带 vs 突破判定（方向敏感 + 保留 `r29 A7`）
 
 - **保留小正信号记录（r29 A7）**：处于随机种子噪声带（`noise_band`）内的同向微小正波动，或未校准 `noise_band` 时的微弱正偏移，仍可按科学诚实性记为开发正信号/keep；**禁止抹除微弱证据**。
-- **突破严格门槛**：判定 `breakthrough` 必须同时满足：
-  1. **有利方向（`direction`）**：指标必须严格优于当前锚点 `best_so_far`（`maximize` 时 `delta > 0`，`minimize` 时 `delta < 0`），且不得伴随 `rejected`/`null`/`discard`/`duplicate` 等负向结论；**退步结果即使标记 `significant=true` 也绝不判为突破**。
-  2. **校准幅度或统计显著**：存在同向排除 `0` 的配对置信区间（`maximize` 时 `ci_low > 0`，`minimize` 时 `ci_high < 0`）、明确同向 `significant=true`，或严格超过已校准的 `noise_band > 0`；当 `noise_band` 未校准且无置信区间/显著性依据时，不将任意微涨误判为突破。
-- 目的：**既不错把退步当突破，也不靠随机噪声给饱和家族无限续命**。
+- **突破严格门槛（同指标可比作用域内）**：所有锚点按 `(eval_contract, split, metric_name, direction)` 作用域独立比较（辅助/延迟指标不覆盖主指标最佳值与优化方向）；判定 `breakthrough` 必须同时满足：
+  1. **有利方向（`direction`）**：指标必须严格优于当前同作用域锚点 `best_so_far`（`maximize` 时 `delta > 0`，`minimize` 时 `delta < 0`），且主终点不得伴随 `rejected`/`null`/`discard`/`duplicate` 等负向结论（次要终点 `secondary endpoint NULL` 不否决主终点正信号）；**退步结果或已撤回记录（`retracted: true`）绝不判为突破**。
+  2. **校准幅度或统计显著**：存在匹配基准或当前锚点的同向排除 `0` 配对置信区间（`maximize` 时 `ci_low > 0`，`minimize` 时 `ci_high < 0`）、明确同向 `significant=true`，或严格超过已校准的 `noise_band > 0`；当 `noise_band` 未校准且无置信区间/显著性依据时，不将任意微涨误判为突破。
+- 目的：**既不错把退步或次要指标当作突破，也不靠随机噪声或未收尾 `T2` 家族无限续命**；当 `T2`/`T3` 家族超出 `incubation_budget` 仍无突破时，后续失败试次同样推进 `incremental_streak` 与 `SATURATED` 判定。
 
 ## 3. 平台期宏观评审策略（默认 `advisory` + 可选 `gate` + 完整冷却周期）
 
@@ -45,7 +45,7 @@
 
 ## 5. 双槽组合探索、成长期保护与家族级关闭边界
 
-- **单次配置否决不关闭整个家族**：某次实验失败或 `rejected`（例如 `"this variant rejected; family remains open"`）仅评价该次配置，**不会**撤除家族剩余孵化保护；只有显式家族级决定（如 `portfolio-set --status closed`、`log-experiment --family-status closed`、`close_family=true` 或明确书面判定整个 `family closed`）才将该家族标为 `CLOSED`。
+- **单次配置否决与自然语言猜测绝不关闭整个家族**：某次实验失败或 `rejected`（例如 `"this variant rejected; family remains open"`）、或条件式阻塞文本（例如 `"Before declaring the family closed, repair the parser"`）**不会**关闭家族或撤除剩余孵化保护；只有**显式结构化决定**（`portfolio-set --status closed`、`log-experiment --family-status closed`、`close_family: true`、`family_decision: closed` 或终态 `[CLOSE_FAMILY]` 标记）才将家族标为 `CLOSED`，且可通过 `--status active` / `reopen_family: true` 显式重开。
 - 维护正交双槽 `.lemvo-portfolio.json`：
   - **`exploit` 槽**：守住当前已验证最稳妥的主线基线（不盲目丢失已验证成果）；
   - **`explore` 槽**：开启**机制正交**的 `T2`/`T3` 新家族；

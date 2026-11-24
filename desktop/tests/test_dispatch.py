@@ -236,6 +236,55 @@ class BridgeTests(unittest.TestCase):
         self.assertTrue(st['idle_armed'])
         self.assertEqual(st['pending_receipts'], 1)
 
+    def test_fresh_dispatch_does_not_inherit_stale_windows_or_server_sid(self):
+        fake = self.base / 'fake_fresh.py'
+        fake.write_text(
+            'import json, sys, pathlib\n'
+            'pathlib.Path("fresh_args.json").write_text(json.dumps(sys.argv[1:]))\n'
+            'print(json.dumps({"type": "thread.started", "thread_id": "new-sid"}))\n'
+            'print(json.dumps({"type": "turn.completed", "usage": {"input_tokens": 1, "output_tokens": 2}}))\n'
+        )
+        c = self.p.config()
+        c['sessions'] = {'windows': 'old-win-sid', 'server': 'old-server-sid'}
+        c['server_command'] = [sys.executable, str(fake)]
+        c['provider'] = c['requested_provider'] = 'server'
+        self.p.save_config(c)
+        run = subprocess.run(
+            [sys.executable, str(ROOT / 'remote_codex_bridge.py'), 'engine', 'exec', '--json', 'fresh prompt'],
+            cwd=self.project, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True
+        )
+        self.assertEqual(run.returncode, 0, run.stderr)
+        seen_args = json.loads((self.project / 'fresh_args.json').read_text())
+        self.assertNotIn('resume', seen_args)
+        self.assertNotIn('old-server-sid', seen_args)
+
+        # Also verify queued windows request gets sid=None when no resume flag is present
+        c = self.p.config()
+        c['provider'] = c['requested_provider'] = 'windows'
+        c['sessions']['windows'] = 'old-win-sid'
+        self.p.save_config(c)
+        proc = subprocess.Popen(
+            [sys.executable, str(ROOT / 'remote_codex_bridge.py'), 'engine', 'exec', '--json', 'fresh windows'],
+            cwd=self.project, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+        )
+        try:
+            end = time.time() + 5
+            req = None
+            while time.time() < end:
+                req = self.p.rpc({'op': 'status'}).get('request')
+                if req:
+                    break
+                time.sleep(0.02)
+            self.assertIsNotNone(req)
+            self.assertIsNone(req['sid'])
+            self.p.rpc({'op': 'provider', 'provider': 'server'})
+            out, err = proc.communicate(timeout=8)
+            self.assertEqual(proc.returncode, 0, err)
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+                proc.wait()
+
 
 class ClientTests(unittest.TestCase):
     def test_claim_response_loss_recovers_before_launch_intent(self):
