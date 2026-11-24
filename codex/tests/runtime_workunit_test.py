@@ -473,6 +473,72 @@ class WorkUnits(unittest.TestCase):
         self.assertIn('Large handoff projected', self.output.read_text(encoding='utf-8'))
         self.assertEqual(work.load('.lemvo-last-work-result.json'), raw)
 
+    def test_yaml_block_scalars_parsed_without_literal_fold_markers(self):
+        Path('research-state.yaml').write_text((
+            'project:\n'
+            '  objective: >-\n'
+            '    Improve counterfactual visual\n'
+            '    change accuracy\n'
+            '  notes: |\n'
+            '    Line one\n'
+            '    Line two\n'
+            'prep:\n'
+            '  next_min_probe: >-\n'
+            '    Evaluate fixed paircon collator\n'
+            '    on dev split\n'
+        ), encoding='utf-8')
+        fields = work.state_fields()
+        self.assertEqual(fields['project.objective'], 'Improve counterfactual visual change accuracy')
+        self.assertEqual(fields['project.notes'], 'Line one\nLine two')
+        self.assertEqual(fields['prep.next_min_probe'], 'Evaluate fixed paircon collator on dev split')
+        self.prepare()
+        unit = work.load(self.td / 'work-unit.json')
+        self.assertNotIn('>-', unit['project_objective'])
+        self.assertIn('Evaluate fixed paircon collator', unit['objective'])
+
+    def test_job_terminal_wake_preserves_planned_kind_objective_and_delivered_receipts(self):
+        Path('research-state.yaml').write_text('project:\n  objective: Top objective\nresearch_plan:\n  stage: implementation\n', encoding='utf-8')
+        self.write('.lemvo-last-work-result.json', {
+            'status': 'waiting',
+            'next_task': {'kind': 'experiment', 'objective': 'Run seed-42 eval of fixed paircon'},
+        })
+        self.write('.lemvo-receipts/job-event-r1.json', {
+            'name': 'paircon_train', 'run_id': 'r1', 'status': 'succeeded',
+            'done_file': 'DONE', 'result_file': 'metrics.json',
+            'metrics': {'change_pair_accuracy': 0.78}, 'consumed': False,
+        })
+        old_wake = os.environ.get('LEMVO_RESOURCE_WAKE')
+        os.environ['LEMVO_RESOURCE_WAKE'] = 'job-terminal'
+        try:
+            self.prepare()
+        finally:
+            if old_wake is None:
+                os.environ.pop('LEMVO_RESOURCE_WAKE', None)
+            else:
+                os.environ['LEMVO_RESOURCE_WAKE'] = old_wake
+        unit = work.load(self.td / 'work-unit.json')
+        self.assertEqual(unit['kind'], 'experiment')
+        self.assertIn('Run seed-42 eval of fixed paircon', unit['objective'])
+        self.assertEqual(len(unit['delivered_receipts']), 1)
+        self.assertEqual(unit['delivered_receipts'][0]['result_file'], 'metrics.json')
+        prompt = self.output.read_text(encoding='utf-8')
+        self.assertIn('DELIVERED JOB RECEIPTS', prompt)
+        self.assertIn('0.78', prompt)
+
+    def test_retraction_and_unreadable_warnings_surface_in_prompt(self):
+        Path('research-state.yaml').write_text('project:\n  objective: Demo\n', encoding='utf-8')
+        Path('logs').mkdir(parents=True, exist_ok=True)
+        Path('logs/experiments.jsonl').write_text('\n'.join([
+            json.dumps({'exp_id': 'retracted_arm', 'family_id': 'f1', 'status': 'complete', 'retracted': True, 'metric': 0.31}),
+            json.dumps({'exp_id': 'weird_arm', 'family_id': 'f2', 'status': 'complete', 'result': {'blob': 'unreadable'}}),
+        ]) + '\n', encoding='utf-8')
+        self.prepare()
+        prompt = self.output.read_text(encoding='utf-8')
+        self.assertIn('RETRACTION SYNC NOTICE', prompt)
+        self.assertIn('retracted_arm', prompt)
+        self.assertIn('STRATEGY EXTRACTION WARNING', prompt)
+        self.assertIn('weird_arm', prompt)
+
 
 if __name__ == '__main__':
     unittest.main()

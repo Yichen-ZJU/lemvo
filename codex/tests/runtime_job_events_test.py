@@ -314,5 +314,99 @@ class JobEvents(unittest.TestCase):
         self.assertTrue(states[0]['producer_alive'])
         self.assertEqual(states[0]['pid'], proc.pid)
 
+    def test_resumed_exit_prefers_attributed_marker_over_prior_unattributed_marker(self):
+        proc = subprocess.Popen(['python3', '-c', 'import time; time.sleep(30)'])
+        rstart = events.identity(proc.pid)['start']
+        proc.terminate()
+        proc.wait(timeout=5)
+        # Forward: unattributed prior FAILED vs attributed current DONE
+        df = self.p / 'done_fwd.json'
+        ff = self.p / 'fail_fwd.json'
+        events.atomic(ff, {'run_id': 'r-fwd', 'status': 'failed', 'exit_code': 1})
+        events.atomic(df, {'run_id': 'r-fwd', 'status': 'succeeded', 'pid': proc.pid, 'pid_start': rstart, 'metrics': {'acc': 0.81}})
+        self.journal([{'name': 'fwd', 'run_id': 'r-fwd', 'pid': 99999999, 'pid_start': '1',
+                       'resume_pid': proc.pid, 'resume_pid_start': rstart,
+                       'done_file': str(df), 'failed_file': str(ff), 'started_epoch': time.time() - 10}])
+        self.assertEqual(self.reconcile(), 'DONE')
+        recs = self.receipts()
+        self.assertEqual(len(recs), 1)
+        self.assertEqual(recs[0][1]['status'], 'succeeded')
+
+        # Reverse: unattributed prior DONE vs attributed current FAILED -> failed
+        (self.p / '.lemvo-receipts').mkdir(exist_ok=True)
+        for p in (self.p / '.lemvo-receipts').glob('*.json'):
+            p.unlink()
+        dr = self.p / 'done_rev.json'
+        fr = self.p / 'fail_rev.json'
+        events.atomic(dr, {'run_id': 'r-rev', 'status': 'succeeded', 'metrics': {'acc': 0.99}})
+        events.atomic(fr, {'run_id': 'r-rev', 'status': 'failed', 'exit_code': 2, 'pid': proc.pid, 'pid_start': rstart})
+        self.journal([{'name': 'rev', 'run_id': 'r-rev', 'pid': 99999999, 'pid_start': '1',
+                       'resume_pid': proc.pid, 'resume_pid_start': rstart,
+                       'done_file': str(dr), 'failed_file': str(fr), 'started_epoch': time.time() - 10}])
+        self.assertEqual(self.reconcile(), 'ENDED')
+        recs = self.receipts()
+        self.assertEqual(len(recs), 1)
+        self.assertEqual(recs[0][1]['status'], 'failed')
+
+    def test_separate_sentinel_done_file_harvests_result_file_metrics(self):
+        proc = subprocess.Popen(['python3', '-c', 'import sys; sys.exit(0)'])
+        proc.wait(timeout=5)
+        done_p = self.p / 'DONE'
+        res_p = self.p / 'actual-metrics.json'
+        done_p.write_text('ok\n', encoding='utf-8')
+        events.atomic(res_p, {'accuracy': 0.78, 'split': 'val'})
+        self.journal([{'name': 'sep', 'run_id': 'r-sep', 'pid': 99999999, 'pid_start': '1',
+                       'done_file': str(done_p), 'result_file': str(res_p),
+                       'accept_cached_markers': True}])
+        self.assertEqual(self.reconcile(), 'DONE')
+        recs = self.receipts()
+        self.assertEqual(len(recs), 1)
+        self.assertEqual(recs[0][1]['status'], 'succeeded')
+        self.assertEqual(recs[0][1]['result_file'], str(res_p))
+        self.assertEqual(recs[0][1]['metrics'], {'accuracy': 0.78})
+        self.assertEqual(recs[0][1]['result'].get('split'), 'val')
+
+    def test_done_sentinel_does_not_mask_incomplete_missing_or_failed_result_file(self):
+        cases = [
+            ('incomplete', '{"metrics":', 'ENDED', 'failed', 'corrupt_result'),
+            ('missing', None, 'ENDED', 'ended', 'missing_result_file'),
+            ('failed', '{"status":"failed","exit_code":1}', 'ENDED', 'failed', 'status'),
+        ]
+        for label, body, exp_tag, exp_status, exp_key in cases:
+            case_dir = self.p / ('case_' + label)
+            case_dir.mkdir(exist_ok=True)
+            done_p = case_dir / 'DONE'
+            done_p.write_text('done\n', encoding='utf-8')
+            res_p = case_dir / 'metrics.json'
+            if body is not None:
+                res_p.write_text(body, encoding='utf-8')
+            rdir = case_dir / 'receipts'
+            jpath = case_dir / 'jobs.json'
+            spath = case_dir / 'states.json'
+            jpath.write_text(json.dumps([{
+                'name': label, 'run_id': 'r-' + label, 'pid': 99999998, 'pid_start': '1',
+                'done_file': str(done_p), 'result_file': str(res_p), 'accept_cached_markers': True,
+            }]), encoding='utf-8')
+            tag = events.reconcile(jpath, spath, rdir)
+            self.assertEqual(tag, exp_tag, label)
+            recs = [json.loads(x.read_text(encoding='utf-8')) for x in sorted(rdir.glob('*.json'))]
+            self.assertEqual(len(recs), 1, label)
+            self.assertEqual(recs[0]['status'], exp_status, label)
+            self.assertIsNone(recs[0].get('metrics'), label)
+            self.assertIn(exp_key, recs[0].get('result') or {}, label)
+
+        # Live producer with DONE sentinel but half-written metrics.json stays running
+        proc, live = self.worker()
+        done_live = self.p / 'LIVE_DONE'
+        res_live = self.p / 'live_metrics.json'
+        done_live.write_text('done\n', encoding='utf-8')
+        res_live.write_text('{"metrics":', encoding='utf-8')
+        live['done_file'] = str(done_live)
+        live['result_file'] = str(res_live)
+        live['accept_cached_markers'] = True
+        self.journal([live])
+        self.assertEqual(self.reconcile(), 'PENDING worker')
+        self.assertFalse(self.receipts())
+
 if __name__=='__main__':
     unittest.main(verbosity=2)

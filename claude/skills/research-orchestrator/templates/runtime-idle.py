@@ -33,11 +33,12 @@ DEFAULT_SOURCES = ('CHARTER.md', 'research-state.yaml', 'STATE.md', 'findings.md
                    'task-profile.md', 'task/TASK.md', 'champion/champion.md')
 # Exact controller-owned paths, not an exclusion of whole budget/prep sections.
 ACCOUNTING_PATHS = frozenset((section, key) for section, keys in (
-    ('budget', ('used', 'remaining')),
+    ('budget', ('used', 'remaining', 'last_budget_turn')),
     ('prep', ('prep_turns', 'prep_wall_time_min', 'prep_cost', 'session_id',
-              'last_seen_observation', 'last_artifact_sha')),
+              'last_seen_observation', 'last_artifact_sha', 'last_settled_turn')),
     ('total', ('total_turns', 'total_wall_time_min', 'total_tokens', 'total_tokens_in',
-               'total_tokens_out', 'total_cost', 'cost_usd_total')),
+               'total_tokens_out', 'total_cost', 'cost_usd_total',
+               'last_accounted_turn', 'last_budget_turn')),
     ('gpu_usage', ('used_hours', 'basis', 'source', 'migrated')),
 ) for key in keys)
 # These exact neutral values are inserted by the accounting helper when

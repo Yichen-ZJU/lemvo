@@ -468,22 +468,91 @@ def _merge_lifecycle_pair(older, newer):
     return merged
 
 
+def _retraction_targets(record):
+    targets = []
+    for k in ('retracts', 'retracted_exp_id', 'retracted_exp_ids', 'invalidates'):
+        v = record.get(k)
+        if isinstance(v, str) and v.strip():
+            targets.append(v.strip())
+        elif isinstance(v, (list, tuple)):
+            for item in v:
+                if isinstance(item, str) and item.strip():
+                    targets.append(item.strip())
+    if not targets:
+        ident = _exp_identifier(record)
+        if ident and ident != 'unnamed':
+            targets.append(ident)
+        rid = str(record.get('run_id') or '').strip()
+        if rid and rid not in targets:
+            targets.append(rid)
+    return targets
+
+
 def _consolidate_records(records):
-    """Merge in-progress dispatch rows with their matching completion rows and dedup cross-source mirrors."""
+    """Merge in-progress dispatch rows, apply retroactive retractions, and dedup cross-source mirrors."""
     out = []
     pending_by_key = {}
+    prior_by_key = {}
+
+    def _register_prior(idx, rec):
+        src = rec.get('_source', '')
+        ident = _exp_identifier(rec)
+        rid = str(rec.get('run_id') or '').strip()
+        if ident and ident != 'unnamed':
+            prior_by_key.setdefault((src, 'id', ident), []).append(idx)
+            prior_by_key.setdefault(('any', 'id', ident), []).append(idx)
+        if rid:
+            prior_by_key.setdefault((src, 'run', rid), []).append(idx)
+            prior_by_key.setdefault(('any', 'run', rid), []).append(idx)
+
     for rec in records:
         src = rec.get('_source', '')
         ident = _exp_identifier(rec)
         rid = str(rec.get('run_id') or '').strip()
         is_pend = _is_lifecycle_pending(rec)
         is_diag = _is_diagnostic_or_smoke(rec)
+        is_ret = _is_retracted(rec)
         key_id = (src, 'id', ident) if ident and ident != 'unnamed' else None
         key_run = (src, 'run', rid) if rid else None
+
+        if is_ret:
+            targets = _retraction_targets(rec)
+            matched_indices = []
+            seen_idx = set()
+            for t in targets:
+                for k in ((src, 'id', t), (src, 'run', t), ('any', 'id', t), ('any', 'run', t)):
+                    for idx in prior_by_key.get(k, ()):
+                        if idx not in seen_idx and out[idx] is not None:
+                            seen_idx.add(idx)
+                            matched_indices.append(idx)
+            if matched_indices:
+                for idx in matched_indices:
+                    if _is_lifecycle_pending(out[idx]):
+                        merged = _merge_lifecycle_pair(out[idx], rec)
+                        merged['retracted'] = True
+                        out[idx] = merged
+                    else:
+                        updated = dict(out[idx])
+                        updated['retracted'] = True
+                        for meta_k in ('retraction_reason', 'retracted_by', 'retracted_utc', 'verdict', 'detail'):
+                            if rec.get(meta_k) and (meta_k != 'verdict' or rec.get(meta_k)):
+                                if meta_k == 'detail' and updated.get('detail'):
+                                    updated['retraction_detail'] = rec[meta_k]
+                                else:
+                                    updated[meta_k] = rec[meta_k]
+                        out[idx] = updated
+                if key_id:
+                    pending_by_key.pop(key_id, None)
+                if key_run:
+                    pending_by_key.pop(key_run, None)
+                # Suppress follow-up retraction-only shell if it only references already matched runs
+                if ident in targets or (rid and rid in targets) or _extract_metric(rec) is None:
+                    continue
 
         if is_pend:
             idx = len(out)
             out.append(rec)
+            _register_prior(idx, rec)
             if key_id:
                 pending_by_key[key_id] = idx
             if key_run:
@@ -491,7 +560,9 @@ def _consolidate_records(records):
             continue
 
         if is_diag:
+            idx = len(out)
             out.append(rec)
+            _register_prior(idx, rec)
             continue
 
         matched_idx = None
@@ -501,14 +572,19 @@ def _consolidate_records(records):
             matched_idx = pending_by_key[key_id]
 
         if matched_idx is not None and out[matched_idx] is not None:
-            out[matched_idx] = _merge_lifecycle_pair(out[matched_idx], rec)
+            moved = _merge_lifecycle_pair(out[matched_idx], rec)
+            if is_ret:
+                moved['retracted'] = True
             pending_by_key.pop(key_id, None)
             pending_by_key.pop(key_run, None)
-            moved = out[matched_idx]
             out[matched_idx] = None
+            idx = len(out)
             out.append(moved)
+            _register_prior(idx, moved)
         else:
+            idx = len(out)
             out.append(rec)
+            _register_prior(idx, rec)
 
     consolidated = [r for r in out if r is not None]
     jsonl_ids = set()
@@ -529,6 +605,37 @@ def _consolidate_records(records):
                 continue
         final.append(r)
     return final
+
+
+def _discover_arbor_trees(root):
+    """Discover Arbor idea_tree.json files under native .arbor/, arbor*/, and runs/*/."""
+    root = Path(root)
+    candidates = []
+    for base in [root] + ([p for p in sorted((root / 'runs').iterdir()) if p.is_dir()] if (root / 'runs').is_dir() else []):
+        for fixed in ('.arbor', '.coordinator'):
+            d = base / fixed
+            if d.is_dir():
+                candidates.append(d)
+        for p in sorted(base.glob('arbor*')):
+            if p.is_dir():
+                candidates.append(p)
+    prune = {'__pycache__', '.git', 'node_modules', 'data', 'datasets', 'checkpoints', 'models', 'images', 'worktrees', 'logs'}
+    found = []
+    seen_dirs = set()
+    for cand in candidates:
+        cand_key = str(cand.resolve()) if cand.exists() else str(cand)
+        if cand_key in seen_dirs:
+            continue
+        seen_dirs.add(cand_key)
+        for dirpath, dirnames, filenames in os.walk(str(cand)):
+            dirnames[:] = sorted(d for d in dirnames if d not in prune)
+            if 'idea_tree.json' in filenames:
+                p = Path(dirpath) / 'idea_tree.json'
+                # Avoid double-counting session-level export copy when .coordinator/idea_tree.json exists
+                if p.parent.name != '.coordinator' and (p.parent / '.coordinator' / 'idea_tree.json').is_file():
+                    continue
+                found.append(p)
+    return sorted(found)
 
 
 def load_experiments(root=Path('.')):
@@ -557,7 +664,7 @@ def load_experiments(root=Path('.')):
         _add_jsonl(p, 'sub:' + str(p.relative_to(root)))
     for p in sorted(root.glob('runs/*/results.tsv')):
         _add_tsv(p, 'sub:' + str(p.relative_to(root)))
-    for p in sorted(root.glob('arbor*/**/idea_tree.json')):
+    for p in _discover_arbor_trees(root):
         rp = str(p.resolve())
         if rp not in seen_paths:
             seen_paths.add(rp)
@@ -1055,6 +1162,7 @@ def analyze(root=Path('.')):
     total_experiments = len(records)
     completed_experiments = 0
     retracted_experiments = 0
+    unreadable_experiments = 0
     incremental_streak = 0
     direction = pol['direction']
     noise_band = pol['noise_band']
@@ -1127,6 +1235,7 @@ def analyze(root=Path('.')):
             'runs': 0,
             'completed_runs': 0,
             'retracted_runs': 0,
+            'unreadable_runs': 0,
             'tiers': [],
             'best_metric': None,
             'best_metrics_by_name': {},
@@ -1149,13 +1258,14 @@ def analyze(root=Path('.')):
         if retracted:
             retracted_experiments += 1
             finfo['retracted_runs'] += 1
-            retracted_ids.append(exp_id)
+            if exp_id not in retracted_ids:
+                retracted_ids.append(exp_id)
             continue
 
         if completed:
-            completed_experiments += 1
-            finfo['completed_runs'] += 1
             if metric is None:
+                unreadable_experiments += 1
+                finfo['unreadable_runs'] += 1
                 unreadable_result_warnings.append({
                     'exp_id': exp_id,
                     'family_id': fam,
@@ -1164,9 +1274,9 @@ def analyze(root=Path('.')):
                     'result_keys': sorted(list(res_dict.keys())) if res_dict else [],
                     'metrics_keys': sorted(list(rec['metrics'].keys())) if isinstance(rec.get('metrics'), dict) else [],
                 })
-                incremental_streak += 1
-                finfo['recent_outcomes'].append({'bt': False})
                 continue
+            completed_experiments += 1
+            finfo['completed_runs'] += 1
 
             prev_fbest = finfo['best_metrics_by_name'].get(m_key)
             if prev_fbest is None:
@@ -1323,6 +1433,7 @@ def analyze(root=Path('.')):
         'total_experiments': total_experiments,
         'completed_experiments': completed_experiments,
         'retracted_experiments': retracted_experiments,
+        'unreadable_experiments': unreadable_experiments,
         'retracted_ids': retracted_ids,
         'tier_counts': tier_counts,
         'incremental_streak': incremental_streak,

@@ -488,7 +488,8 @@ def classify(job, now=None):
     elif done_obs:
         observed = done_obs
 
-    # Enrich plain-text or sentinel done_file completion with separate result_file payload
+    # Separate declared result_file must confirm scientific outcome; a DONE sentinel
+    # cannot mask a missing, half-written, or explicitly failed result_file.
     if observed and observed.get('state') == 'succeeded' and result_path and result_path != done_path:
         res_obs = marker(
             result_path, job, running,
@@ -496,10 +497,17 @@ def classify(job, now=None):
             attempt=attempt, default_succeeded_without_status=True,
         )
         if res_obs is None:
-            if not running:
-                observed.setdefault('result', {})['missing_result_file'] = result_path
-        elif res_obs.get('state') in ('incomplete', 'non-terminal') and running:
-            observed = {'state': 'running'}
+            if running:
+                observed = {'state': 'running'}
+            else:
+                observed = {
+                    'state': 'ended' if attempt.get('pid') and not external else 'unknown',
+                    'result': {
+                        'missing_result_file': result_path,
+                        'reason': 'declared_result_file_missing',
+                        'done_sentinel': done_path,
+                    },
+                }
         elif res_obs.get('state') == 'succeeded':
             if not observed.get('metrics') and res_obs.get('metrics'):
                 observed['metrics'] = res_obs['metrics']
@@ -511,8 +519,13 @@ def classify(job, now=None):
             observed['fingerprint'] = hashlib.sha256(
                 (str(observed.get('fingerprint') or '') + ':' + str(res_obs.get('fingerprint') or '')).encode()
             ).hexdigest()
-        elif res_obs.get('state') == 'old-marker':
-            observed.setdefault('result', {})['stale_result_file'] = result_path
+        elif res_obs.get('state') == 'failed':
+            observed = dict(res_obs)
+        else:
+            if running:
+                observed = {'state': 'running'}
+            else:
+                observed = dict(res_obs)
 
     harvested = False
     if not running:

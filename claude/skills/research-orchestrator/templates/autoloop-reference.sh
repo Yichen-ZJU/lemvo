@@ -67,7 +67,7 @@
 set -uo pipefail
 # One version source: write_helper emits this marker into the generated Python.
 # Bump on helper changes so existing project-local helpers migrate exactly once.
-HELPER_VERSION="4.15"
+HELPER_VERSION="4.16"
 RUNTIME_SUPPORT="$(cd "$(dirname "$0")" && pwd)/runtime-support.py"
 RUNTIME_CONTRACT="$(cd "$(dirname "$0")" && pwd)/runtime-contract.py"
 WORK_UNIT="$(cd "$(dirname "$0")" && pwd)/work-unit.py"
@@ -172,7 +172,7 @@ write_helper() {
   printf 'CONTRACT_PATH = %s\n' "$(python3 -c 'import json,sys; print(json.dumps(sys.argv[1]))' "$RUNTIME_CONTRACT")" >> "$HELPER"
   cat >> "$HELPER" <<'PYEOF'
 """autoloop accounting helper. Python 3.6 compatible; standard library only."""
-import fnmatch, hashlib, json, math, os, re, sys, subprocess
+import fnmatch, hashlib, json, math, os, re, sys, subprocess, tempfile
 
 STATE = "research-state.yaml"
 PREP_DEFAULTS = [("prep_turns", "0"), ("prep_wall_time_min", "0.0"), ("prep_cost", "null"),
@@ -387,6 +387,55 @@ def _applied_path():
     td = os.environ.get("LEMVO_TURN_DIR", "").strip()
     return os.path.join(td, ".accounting-applied.json") if (td and os.path.isdir(td)) else None
 
+def _turn_stamp():
+    td = os.environ.get("LEMVO_TURN_DIR", "").strip()
+    if not td or not os.path.isdir(td):
+        return None
+    base = re.sub(r"[^A-Za-z0-9._-]+", "-", os.path.basename(os.path.normpath(td))).strip("-") or "turn"
+    digest = hashlib.sha256(os.path.realpath(td).encode("utf-8")).hexdigest()[:12]
+    return "%s-%s" % (base, digest)
+
+def _read_state_stamps():
+    stamps = {}
+    if not os.path.exists(STATE):
+        return stamps
+    try:
+        raw_lines = open(STATE, encoding="utf-8", errors="replace").read().splitlines()
+    except OSError:
+        return stamps
+    top = ""
+    for l in raw_lines:
+        m = re.match(r"^(\s*)([A-Za-z_][\w-]*)\s*:\s*(.*)$", strip_inline_comment(l))
+        if not m:
+            continue
+        indent, key, val = len(m.group(1)), m.group(2), m.group(3).strip()
+        if indent == 0:
+            top = key
+        elif indent == 2 and key in ("last_settled_turn", "last_accounted_turn", "last_budget_turn"):
+            v = unquote(val)
+            if v and v not in ("none", "null", "~"):
+                stamps[(top, key)] = v
+    return stamps
+
+def _set_or_append_section_key(lines, section, key, val):
+    if not set_section_key(lines, section, key, val):
+        lines.extend([section + ":", "  " + key + ": " + str(val)])
+
+def _atomic_write_state(lines):
+    target = os.path.abspath(STATE)
+    parent = os.path.dirname(target) or "."
+    fd, tmp = tempfile.mkstemp(prefix=".research-state.tmp-", dir=parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write("\n".join(lines) + "\n")
+        os.replace(tmp, target)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
 def _load_applied(path):
     if not path or not os.path.exists(path):
         return {}
@@ -420,6 +469,31 @@ def cmd_budget_add():
             print(ln)
         print("IDEMPOTENT_SKIP=yes")
         return
+    tstamp = _turn_stamp()
+    stamps = _read_state_stamps()
+    if tstamp and (
+        stamps.get(("budget", "last_budget_turn")) == tstamp
+        or stamps.get(("total", "last_budget_turn")) == tstamp
+    ):
+        b = read_budget()
+        if b["unit"] != "usd":
+            _, _, total = read_fields()
+            cur = num_or_none(total.get("cost_usd_total"))
+            val = str(cur) if cur is not None else str(total.get("cost_usd_total", "unknown"))
+            out_lines = [
+                "BUDGET_ADD_SKIPPED=non-usd-unit(" + str(b["unit"]) + ")",
+                "COST_USD_TOTAL_NOW=" + val,
+            ]
+        else:
+            cur = num_or_none(b.get("used"))
+            val = str(cur) if cur is not None else str(b.get("used", "unknown"))
+            out_lines = ["BUDGET_USED_NOW=" + val]
+        applied["budget_add"] = {"lines": out_lines}
+        _save_applied(apath, applied)
+        for ln in out_lines:
+            print(ln)
+        print("IDEMPOTENT_SKIP=yes")
+        return
     inc = sys.argv[2] if len(sys.argv) > 2 else "unknown"
     if inc == "unknown":
         print("BUDGET_USED_NOW=unknown"); return
@@ -431,12 +505,15 @@ def cmd_budget_add():
         print("BUDGET_USED_NOW=state-missing"); return
     b = read_budget()
     if b["unit"] != "usd":
-        _, _, total = read_fields()
+        f, prep, total = read_fields()
+        init_sections(f, prep, total)
         cur = num_or_none(total.get("cost_usd_total"))
         newv = incf if cur is None else round(cur + incf, 6)
         LINES = open(STATE, encoding="utf-8").read().splitlines()
-        set_section_key(LINES, "total", "cost_usd_total", newv)
-        open(STATE, "w", encoding="utf-8").write("\n".join(LINES) + "\n")
+        _set_or_append_section_key(LINES, "total", "cost_usd_total", newv)
+        if tstamp:
+            _set_or_append_section_key(LINES, "total", "last_budget_turn", tstamp)
+        _atomic_write_state(LINES)
         out_lines = [
             "BUDGET_ADD_SKIPPED=non-usd-unit(" + str(b["unit"]) + ")",
             "COST_USD_TOTAL_NOW=" + str(newv),
@@ -459,7 +536,9 @@ def cmd_budget_add():
     cap = num_or_none(b["total_cap"])
     if cap is not None:
         set_section_key(LINES, "budget", "remaining", round(cap - used, 6))
-    open(STATE, "w", encoding="utf-8").write("\n".join(LINES) + "\n")
+    if tstamp:
+        _set_or_append_section_key(LINES, "budget", "last_budget_turn", tstamp)
+    _atomic_write_state(LINES)
     out_lines = ["BUDGET_USED_NOW=" + str(used)]
     applied["budget_add"] = {"lines": out_lines}
     _save_applied(apath, applied)
@@ -722,6 +801,49 @@ def cmd_settle():
         print("TOTAL_TURNS_NOW=" + str(cached.get("total_turns", 0)))
         print("IDEMPOTENT_SKIP=yes")
         return
+    tstamp = _turn_stamp()
+    stamps = _read_state_stamps()
+    if tstamp and stamps.get(("prep", "last_settled_turn")) == tstamp:
+        _, prep, total = read_fields()
+        try:
+            turns = int(prep.get("prep_turns", "0"))
+        except (TypeError, ValueError):
+            turns = 0
+        try:
+            total_turns = int(total.get("total_turns", "0"))
+        except (TypeError, ValueError):
+            total_turns = 0
+        artifact = prep.get("last_informative_artifact", "none")
+        typed = bool(artifact and artifact != "none" and artifact_is_construction(artifact))
+        record_path = os.environ.get("LEMVO_PROGRESS_RECORD")
+        if record_path and os.path.exists(record_path):
+            try:
+                with open(record_path, encoding="utf-8") as fh:
+                    new_progress = bool(json.load(fh).get("progress", False))
+            except (OSError, ValueError):
+                new_progress = False
+        elif os.environ.get("LEMVO_TURN_INTERRUPTED") == "yes":
+            new_progress = False
+        else:
+            new_sha = sha256_file(artifact) if typed else None
+            new_progress = (
+                turns == 0
+                and bool(new_sha)
+                and new_sha == prep.get("last_artifact_sha", "none")
+            )
+        applied["settle"] = {
+            "new_progress": bool(new_progress),
+            "typed": bool(typed),
+            "prep_turns": turns,
+            "total_turns": total_turns,
+        }
+        _save_applied(apath, applied)
+        print("NEW_PROGRESS=" + ("yes" if new_progress else "no"))
+        print("ARTIFACT_TYPED=" + ("yes" if typed else "no"))
+        print("PREP_TURNS_NOW=" + str(turns))
+        print("TOTAL_TURNS_NOW=" + str(total_turns))
+        print("IDEMPOTENT_SKIP=yes")
+        return
     f, prep, total = read_fields()
     init_sections(f, prep, total)
     artifact = prep.get("last_informative_artifact", "none")
@@ -757,12 +879,14 @@ def cmd_settle():
     turns = turns if interrupted else (0 if new_progress else (turns if inspection_unknown else turns + 1))
     total_turns += 1
     LINES = open(STATE, encoding="utf-8").read().splitlines()
-    set_in("prep", "prep_turns", turns)
-    set_in("prep", "last_seen_observation", last_obs if new_progress else last_seen)
+    _set_or_append_section_key(LINES, "prep", "prep_turns", turns)
+    _set_or_append_section_key(LINES, "prep", "last_seen_observation", last_obs if new_progress else last_seen)
     if new_progress and new_sha and not interrupted:
-        set_in("prep", "last_artifact_sha", new_sha)
-    set_in("total", "total_turns", total_turns)
-    open(STATE, "w", encoding="utf-8").write("\n".join(LINES) + "\n")
+        _set_or_append_section_key(LINES, "prep", "last_artifact_sha", new_sha)
+    if tstamp:
+        _set_or_append_section_key(LINES, "prep", "last_settled_turn", tstamp)
+    _set_or_append_section_key(LINES, "total", "total_turns", total_turns)
+    _atomic_write_state(LINES)
     applied["settle"] = {
         "new_progress": bool(new_progress),
         "typed": bool(typed),
@@ -787,6 +911,17 @@ def cmd_account():
         print("WALL_NOW=" + str(applied["account"].get("wall_min", "0.0")))
         print("IDEMPOTENT_SKIP=yes")
         return
+    tstamp = _turn_stamp()
+    stamps = _read_state_stamps()
+    if tstamp and stamps.get(("total", "last_accounted_turn")) == tstamp:
+        _, _, total = read_fields()
+        wall_num = num_or_none(total.get("total_wall_time_min"))
+        wall_val = wall_num if wall_num is not None else total.get("total_wall_time_min", "0.0")
+        applied["account"] = {"wall_min": wall_val}
+        _save_applied(apath, applied)
+        print("WALL_NOW=" + str(wall_val))
+        print("IDEMPOTENT_SKIP=yes")
+        return
     elapsed = float(sys.argv[2])
     tin, tout = sys.argv[3], sys.argv[4]
     f, prep, total = read_fields()
@@ -798,12 +933,14 @@ def cmd_account():
             return d
     wall = round(num(total.get("total_wall_time_min")) + elapsed / 60.0, 2)
     LINES = open(STATE, encoding="utf-8").read().splitlines()
-    set_in("total", "total_wall_time_min", wall)
+    _set_or_append_section_key(LINES, "total", "total_wall_time_min", wall)
     if tin != "unknown":
-        set_in("total", "total_tokens_in", int(num(total.get("total_tokens_in"))) + int(tin))
+        _set_or_append_section_key(LINES, "total", "total_tokens_in", int(num(total.get("total_tokens_in"))) + int(tin))
     if tout != "unknown":
-        set_in("total", "total_tokens_out", int(num(total.get("total_tokens_out"))) + int(tout))
-    open(STATE, "w", encoding="utf-8").write("\n".join(LINES) + "\n")
+        _set_or_append_section_key(LINES, "total", "total_tokens_out", int(num(total.get("total_tokens_out"))) + int(tout))
+    if tstamp:
+        _set_or_append_section_key(LINES, "total", "last_accounted_turn", tstamp)
+    _atomic_write_state(LINES)
     applied["account"] = {"wall_min": wall}
     _save_applied(apath, applied)
     print("WALL_NOW=" + str(wall))

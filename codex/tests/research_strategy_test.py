@@ -69,7 +69,7 @@ class StrategyEngineTests(unittest.TestCase):
             {'exp_id': 'selective_v9d_antibleed_lex_l03_armselv9d', 'cycle': 17, 'outcome': 'NULL', 'metric': 0.5833},
             {'exp_id': 'selective_v9c_antibleed_lex_l01_armselv9c', 'cycle': 17, 'outcome': 'NULL on primary', 'metric': 0.6194},
             {'exp_id': 'selective_v10e_soup3_l00_armselv10e', 'cycle': 20, 'outcome': 'REJECTED', 'metric': 0.5778},
-            {'exp_id': 'selective_v11b_budget2x_s17_armselv11b', 'cycle': 21, 'outcome': 'RECORD but same-config replicate of v7c_seedvar', 'metric': 0.6389, 'detail': 'duplicate-of-v7c; Loss-level mechanism families CLOSED'},
+            {'exp_id': 'selective_v11b_budget2x_s17_armselv11b', 'cycle': 21, 'outcome': 'RECORD but same-config replicate of v7c_seedvar', 'metric': 0.6389, 'family_status': 'closed', 'detail': 'duplicate-of-v7c; Loss-level mechanism families CLOSED'},
         ]
         (self.root / 'logs/experiments.jsonl').write_text('\n'.join(json.dumps(r) for r in rows) + '\n', encoding='utf-8')
         snap = strategy.analyze(self.root)
@@ -365,6 +365,131 @@ class StrategyEngineTests(unittest.TestCase):
             src = path.read_text(encoding='utf-8')
             for pat in forbidden:
                 self.assertIsNone(re.search(pat, src), '%s matched forbidden py3.6 pattern %s' % (path.name, pat))
+
+    def test_v22_cross_metric_conditional_close_t2_escalation_and_tsv_consolidation(self):
+        (self.root / 'logs').mkdir(parents=True, exist_ok=True)
+        # 1) Secondary minimize metric must not flip primary accuracy direction
+        cross_rows = [
+            {'exp_id': 'b', 'metric': 0.80, 'intervention_tier': 'T0', 'family_id': 'cand', 'metric_name': 'accuracy'},
+            {'exp_id': 'l', 'metric': 60, 'intervention_tier': 'T1', 'family_id': 'cand', 'metric_name': 'latency_ms', 'direction': 'minimize', 'significant': True},
+            {'exp_id': 'c', 'metric': 0.90, 'intervention_tier': 'T1', 'family_id': 'cand', 'metric_name': 'accuracy', 'paired_ci': [0.08, 0.12]},
+        ]
+        (self.root / 'logs/experiments.jsonl').write_text('\n'.join(json.dumps(r) for r in cross_rows) + '\n', encoding='utf-8')
+        snap = strategy.analyze(self.root)
+        self.assertAlmostEqual(snap['anchor_best'], 0.90)
+        self.assertEqual(snap['families']['cand']['breakthroughs'], 1)
+        self.assertEqual(snap['incremental_streak'], 0)
+
+        # 2) Generic child metric inherits primary metric_name & secondary NULL does not veto primary positive CI
+        pos_rows = [
+            {'exp_id': 'base', 'metric': 0.50, 'intervention_tier': 'T0', 'family_id': 'cand', 'metric_name': 'accuracy'},
+            {'exp_id': 'new', 'metric': 0.55, 'intervention_tier': 'T1', 'family_id': 'cand', 'paired_ci': [0.01, 0.08], 'outcome': 'primary improved vs matched comparator; secondary endpoint NULL'},
+        ]
+        (self.root / 'logs/experiments.jsonl').write_text('\n'.join(json.dumps(r) for r in pos_rows) + '\n', encoding='utf-8')
+        snap = strategy.analyze(self.root)
+        self.assertAlmostEqual(snap['anchor_best'], 0.55)
+        self.assertEqual(snap['families']['cand']['breakthroughs'], 1)
+
+        # 3) Conditional blocked prose does not close family or count completed run
+        cond_rows = [
+            {'exp_id': 'worker', 'family_id': 'cand', 'status': 'blocked', 'outcome': 'blocked', 'detail': 'Before declaring the family closed, repair the parser.'},
+        ]
+        (self.root / 'logs/experiments.jsonl').write_text('\n'.join(json.dumps(r) for r in cond_rows) + '\n', encoding='utf-8')
+        snap = strategy.analyze(self.root)
+        self.assertEqual(snap['completed_experiments'], 0)
+        self.assertEqual(snap['families']['cand']['status'], 'ACTIVE')
+
+        # 4) T2 series past incubation saturates and increments incremental_streak
+        t2_rows = [{'exp_id': 'base', 'metric': 0.50, 'intervention_tier': 'T0', 'family_id': 'cand', 'metric_name': 'accuracy'}]
+        t2_rows += [{'exp_id': 'w_%d' % i, 'metric': 0.48, 'intervention_tier': 'T2', 'family_id': 'cand', 'outcome': 'NULL'} for i in range(12)]
+        (self.root / 'logs/experiments.jsonl').write_text('\n'.join(json.dumps(r) for r in t2_rows) + '\n', encoding='utf-8')
+        snap = strategy.analyze(self.root)
+        self.assertEqual(snap['incremental_streak'], 10)
+        self.assertTrue(snap['macro_review_armed'])
+        self.assertEqual(snap['families']['cand']['status'], 'SATURATED')
+
+        # 5) TSV merged with non-overlapping DISPATCHED jsonl keeps completed TSV trials
+        (self.root / 'logs/experiments.jsonl').write_text(json.dumps({'exp_id': 'new', 'outcome': 'DISPATCHED'}) + '\n', encoding='utf-8')
+        tsv = 'iteration\ttimestamp\tcommit\tmetric\tdelta\tguard\tstatus\tmove\tdescription\n' + ''.join(
+            '%d\t2026-11-22\tabc\t0.5\t0\tok\tKEEP\tfollow\t[T2] [family=hello]\n' % i for i in range(1, 7)
+        )
+        (self.root / 'results.tsv').write_text(tsv, encoding='utf-8')
+        snap = strategy.analyze(self.root)
+        self.assertEqual(snap['completed_experiments'], 6)
+        self.assertAlmostEqual(snap['anchor_best'], 0.5)
+        self.assertEqual(snap['families']['hello']['status'], 'SATURATED')
+        self.assertEqual(snap['families']['new']['status'], 'ACTIVE')
+
+    def test_v22_nested_result_lifecycle_retraction_and_unreadable_warning(self):
+        (self.root / 'logs').mkdir(parents=True, exist_ok=True)
+        (self.root / 'research-state.yaml').write_text(
+            'objective: >-\n  Improve counterfactual accuracy\n'
+            'eval_contract:\n  metrics: [change_pair_accuracy, invariant_pair_accuracy]\n',
+            encoding='utf-8',
+        )
+        rows = [
+            {'arm': 'sft', 'status': 'running', 'family_id': 'sft', 'intervention_tier': 'T1', 'run_id': 'r-sft'},
+            {'arm': 'sft', 'status': 'complete', 'family_id': 'sft', 'run_id': 'r-sft',
+             'result': {'change_pair_accuracy': 0.625, 'invariant_pair_accuracy': 0.75}},
+            {'arm': 'bad_run', 'status': 'complete', 'family_id': 'cand', 'intervention_tier': 'T2',
+             'retracted': True, 'result': {'change_pair_accuracy': 0.30}},
+            {'arm': 'odd_run', 'status': 'complete', 'family_id': 'cand', 'intervention_tier': 'T2',
+             'result': {'note_only': 'hello'}},
+        ]
+        (self.root / 'logs/experiments.jsonl').write_text('\n'.join(json.dumps(r) for r in rows) + '\n', encoding='utf-8')
+        snap = strategy.analyze(self.root)
+        self.assertEqual(snap['total_experiments'], 3)
+        self.assertEqual(snap['retracted_experiments'], 1)
+        self.assertEqual(snap['retracted_ids'], ['bad_run'])
+        self.assertEqual(snap['primary_metric'], 'change_pair_accuracy')
+        self.assertAlmostEqual(snap['anchor_best'], 0.625)
+        self.assertEqual([u['exp_id'] for u in snap['unreadable_result_warnings']], ['odd_run'])
+
+    def test_v221_append_retraction_revokes_anchor_unreadable_neutral_and_dot_arbor(self):
+        (self.root / 'logs').mkdir(parents=True, exist_ok=True)
+        # 1) Appended retraction with matching exp_id revokes prior 0.90 anchor
+        base = {'exp_id': 'base', 'family_id': 'baseline', 'metric_name': 'accuracy', 'metric': 0.5, 'status': 'complete', 'intervention_tier': 'T0'}
+        cand = {'exp_id': 'foo', 'family_id': 'new', 'metric_name': 'accuracy', 'metric': 0.9, 'status': 'complete', 'intervention_tier': 'T1', 'paired_ci': [0.2, 0.5], 'comparator': 'base'}
+        ret = {'exp_id': 'foo', 'family_id': 'new', 'status': 'retracted', 'retracted': True}
+        (self.root / 'logs/experiments.jsonl').write_text('\n'.join(json.dumps(r) for r in (base, cand, ret)) + '\n', encoding='utf-8')
+        snap = strategy.analyze(self.root)
+        self.assertEqual(snap['completed_experiments'], 1)
+        self.assertEqual(snap['retracted_experiments'], 1)
+        self.assertEqual(snap['retracted_ids'], ['foo'])
+        self.assertAlmostEqual(snap['anchor_best'], 0.5)
+        self.assertEqual(snap['incremental_streak'], 0)
+        self.assertFalse(snap['macro_review_armed'])
+
+        # 1b) Explicit erratum entry targeting retracts=['foo'] also revokes
+        err = {'exp_id': 'erratum-1', 'retracts': ['foo'], 'retracted': True}
+        (self.root / 'logs/experiments.jsonl').write_text('\n'.join(json.dumps(r) for r in (base, cand, err)) + '\n', encoding='utf-8')
+        snap_err = strategy.analyze(self.root)
+        self.assertEqual(snap_err['completed_experiments'], 1)
+        self.assertAlmostEqual(snap_err['anchor_best'], 0.5)
+        self.assertEqual(snap_err['retracted_ids'], ['foo'])
+
+        # 2) Unreadable completed rows warn without counting as scientific stagnation
+        rows_unr = [base] + [{'exp_id': 'unr_%d' % i, 'family_id': 'f', 'status': 'complete', 'result': {'new_field': 0.6}} for i in range(6)]
+        (self.root / 'logs/experiments.jsonl').write_text('\n'.join(json.dumps(r) for r in rows_unr) + '\n', encoding='utf-8')
+        snap_unr = strategy.analyze(self.root)
+        self.assertEqual(snap_unr['completed_experiments'], 1)
+        self.assertEqual(snap_unr['unreadable_experiments'], 6)
+        self.assertEqual(len(snap_unr['unreadable_result_warnings']), 6)
+        self.assertEqual(snap_unr['incremental_streak'], 0)
+        self.assertFalse(snap_unr['macro_review_armed'])
+        self.assertEqual(snap_unr['families']['f']['status'], 'ACTIVE')
+
+        # 3) Native .arbor/sessions/<name>/.coordinator/idea_tree.json discovery & export dedup
+        (self.root / 'logs/experiments.jsonl').unlink()
+        coord = self.root / '.arbor/sessions/demo/.coordinator'
+        coord.mkdir(parents=True)
+        tree_doc = {'nodes': {'ROOT': {'status': 'root'}, 'n1': {'status': 'done', 'score': 0.7, 'family_id': 'arbor_f'}}}
+        (coord / 'idea_tree.json').write_text(json.dumps(tree_doc), encoding='utf-8')
+        # Simulate Arbor export copy alongside .coordinator without double-counting
+        (coord.parent / 'idea_tree.json').write_text(json.dumps(tree_doc), encoding='utf-8')
+        snap_arbor = strategy.analyze(self.root)
+        self.assertEqual(snap_arbor['completed_experiments'], 1)
+        self.assertAlmostEqual(snap_arbor['anchor_best'], 0.7)
 
 
 if __name__ == '__main__':

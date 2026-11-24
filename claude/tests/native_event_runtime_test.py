@@ -453,6 +453,49 @@ print(json.dumps(dict(type='result',subtype='success',is_error=False,result='Wai
         until(lambda:not owner_mod.alive(entry))
         self.assertEqual(1, len(read_calls(self.root)))
 
+    def test_pre_dispatch_blocks_hold_indented_state_guided_and_exhausted_usd_cap(self):
+        fake = self.root / 'fake_cli.py'
+        fake.write_text('print("SHOULD_NOT_RUN")\n')
+        owner = owner_mod.Owner(self.root, poll=0.01, launcher=[sys.executable, str(fake)], engine='codex')
+
+        # 1) HOLD marker
+        (self.root / 'HOLD').write_text('hold\n')
+        self.assertIsNotNone(owner.dispatch_blocked())
+        owner.spawn('job_terminal', events=[{'job_id': 'j1', 'signature': 's1'}])
+        self.assertEqual(owner.state.get('launch_count', 0), 0)
+        (self.root / 'HOLD').unlink()
+
+        # 2) BLOCKED-USER marker
+        (self.root / 'BLOCKED-USER').write_text('need input\n')
+        owner.spawn('job_terminal', events=[{'job_id': 'j2', 'signature': 's2'}])
+        self.assertEqual(owner.state.get('launch_count', 0), 0)
+        (self.root / 'BLOCKED-USER').unlink()
+
+        # 3) Indented project.status: HOLD in research-state.yaml (exercises indent == 2 int check)
+        (self.root / 'research-state.yaml').write_text('project:\n  status: HOLD\nbudget:\n  unit: usd\n  used: 0\n  total_cap: 1\n  cap_authorized: no\n')
+        owner.spawn('job_terminal', events=[{'job_id': 'j3', 'signature': 's3'}])
+        self.assertEqual(owner.state.get('launch_count', 0), 0)
+
+        # 4) Guided mode without steer guidance or .lemvo-advance-once blocks, then steer unblocks
+        (self.root / 'research-state.yaml').write_text('project:\n  status: ACTIVE\nbudget:\n  unit: usd\n  used: 0\n  total_cap: 1\n  cap_authorized: yes\n  cap_source: user-test\n')
+        (self.root / '.lemvo-mode').write_text('guided\n')
+        blocked = owner.dispatch_blocked()
+        self.assertEqual(blocked, ('waiting_user', 'guided-idle'))
+        owner.spawn('job_terminal', events=[{'job_id': 'j4', 'signature': 's4'}])
+        self.assertEqual(owner.state.get('launch_count', 0), 0)
+
+        (self.root / '.lemvo-steer-queue').mkdir(exist_ok=True)
+        (self.root / '.lemvo-steer-queue/q-1.md').write_text('approve next step\n')
+        self.assertIsNone(owner.dispatch_blocked())
+        (self.root / '.lemvo-mode').write_text('unattended\n')
+
+        # 5) Exhausted authorized USD cap blocks
+        (self.root / 'research-state.yaml').write_text('project:\n  status: ACTIVE\nbudget:\n  unit: usd\n  used: 1.5\n  total_cap: 1.0\n  cap_authorized: yes\n  cap_source: user-test\n')
+        blocked = owner.dispatch_blocked()
+        self.assertEqual(blocked, ('over_budget', 'authorized_usd_budget_exhausted'))
+        owner.spawn('job_terminal', events=[{'job_id': 'j5', 'signature': 's5'}])
+        self.assertEqual(owner.state.get('launch_count', 0), 0)
+
 
 def read_calls(root):
     return [json.loads(line) for line in (root/'calls.jsonl').read_text().splitlines()]
