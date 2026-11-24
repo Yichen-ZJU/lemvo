@@ -236,5 +236,83 @@ class JobEvents(unittest.TestCase):
         self.assertIsNone(controller.poll())
 
 
+    def test_blank_harvest_summary_does_not_swallow_result_or_fabricate_success(self):
+        done = self.p / 'blank_done.json'
+        events.atomic(done, {'run_id': 'b1', 'status': 'succeeded', 'exit_code': 0})
+        self.journal([
+            {'name': 'blank-with-done', 'run_id': 'b1', 'status': 'running',
+             'harvest_summary': '', 'done_path': str(done), 'started_epoch': time.time() - 1000},
+            {'name': 'blank-no-done', 'run_id': 'b2', 'status': 'running',
+             'harvest_summary': '', 'started_epoch': time.time() - 1000},
+        ])
+        res = self.reconcile()
+        self.assertEqual(res, 'ENDED')
+        by_run = {r['run_id']: r for _, r in self.receipts()}
+        self.assertEqual(by_run['b1']['status'], 'succeeded')
+        self.assertEqual(by_run['b2']['status'], 'unknown')
+
+    def test_result_path_plain_progress_text_never_declares_succeeded(self):
+        prog = self.p / 'progress.txt'
+        prog.write_text('training step 3 / 100', encoding='utf-8')
+        _, live = self.worker()
+        live.pop('done_file', None)
+        live['result_path'] = str(prog)
+        self.journal([live])
+        self.assertEqual(self.reconcile(), 'PENDING worker')
+        self.assertFalse(self.receipts())
+
+        # Stale PID-less progress text transitions to unknown, never succeeded
+        self.journal([{'name': 'prog-stale', 'run_id': 'p2', 'result_path': str(prog),
+                       'started_epoch': time.time() - 1000}])
+        self.assertEqual(self.reconcile(), 'ENDED')
+        rcpts = self.receipts()
+        self.assertEqual(len(rcpts), 1)
+        self.assertEqual(rcpts[0][1]['status'], 'unknown')
+        self.assertNotEqual(rcpts[0][1]['status'], 'succeeded')
+
+    def test_sentinel_path_not_preempted_by_intermediate_result_path(self):
+        prog = self.p / 'progress.txt'
+        prog.write_text('training step 3 / 100', encoding='utf-8')
+        worker, live = self.worker()
+        live['result_path'] = str(prog)
+        self.journal([live])
+        self.assertEqual(self.reconcile(), 'PENDING worker')
+        self.assertFalse(self.receipts())
+
+    def test_resumed_live_job_ignores_unattributed_prior_failed_marker(self):
+        proc, _ = self.worker()
+        rstart = events.identity(proc.pid)['start']
+        ff = self.p / 'failed.json'
+        events.atomic(ff, {'run_id': 'r-res', 'status': 'failed', 'exit_code': 1})
+        self.journal([{'name': 'resumed', 'run_id': 'r-res', 'pid': 99999999, 'pid_start': '1',
+                       'resume_pid': proc.pid, 'resume_pid_start': rstart,
+                       'failed_file': str(ff), 'started_epoch': time.time() - 100}])
+        self.assertEqual(self.reconcile(), 'PENDING resumed')
+        self.assertFalse(self.receipts())
+        states = json.loads((self.p / '.lemvo-jobstates.json').read_text(encoding='utf-8'))
+        self.assertEqual(states[0]['pid'], proc.pid)
+        self.assertTrue(states[0]['producer_alive'])
+
+    def test_unbound_resume_pid_rejected_without_corroboration(self):
+        proc = subprocess.Popen(['sleep', '30'])
+        self.addCleanup(lambda: (proc.terminate() if proc.poll() is None else None, proc.wait()))
+        self.journal([{'name': 'unbound', 'run_id': 'u1', 'pid': 99999999, 'pid_start': '1',
+                       'resume_pid': proc.pid, 'started_epoch': time.time() - 100}])
+        self.assertEqual(self.reconcile(), 'ENDED')
+        states = json.loads((self.p / '.lemvo-jobstates.json').read_text(encoding='utf-8'))
+        self.assertFalse(states[0]['producer_alive'])
+        self.assertTrue(states[0].get('unbound_resume_pid'))
+
+    def test_corroborated_unbound_resume_pid_accepted_when_cmdline_matches(self):
+        proc = subprocess.Popen(['python3', '-c', 'import time; time.sleep(30)', 'unique_run_v10d_token'])
+        self.addCleanup(lambda: (proc.terminate() if proc.poll() is None else None, proc.wait()))
+        self.journal([{'name': 'corrob', 'run_id': 'unique_run_v10d_token',
+                       'pid': 99999999, 'pid_start': '1',
+                       'resume_pid': proc.pid, 'started_epoch': time.time() - 100}])
+        self.assertEqual(self.reconcile(), 'PENDING corrob')
+        states = json.loads((self.p / '.lemvo-jobstates.json').read_text(encoding='utf-8'))
+        self.assertTrue(states[0]['producer_alive'])
+        self.assertEqual(states[0]['pid'], proc.pid)
+
 if __name__=='__main__':
     unittest.main(verbosity=2)

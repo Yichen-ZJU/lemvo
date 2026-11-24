@@ -1,4 +1,4 @@
-"""CPU-only tests for Lemvo v2 strategy engine, plateau gate, and anti-incrementalism."""
+"""CPU-only tests for Lemvo v2.1 strategy engine, plateau advisory/gate, and anti-incrementalism."""
 import importlib.util
 import json
 import os
@@ -16,6 +16,7 @@ if not TPL_DIR.is_dir():
     TPL_DIR = HERE
 STRATEGY_PATH = TPL_DIR / 'research-strategy.py'
 WORK_UNIT_PATH = TPL_DIR / 'work-unit.py'
+JOB_EVENTS_PATH = TPL_DIR / 'job-events.py'
 
 
 def _load(path, name):
@@ -37,7 +38,11 @@ class StrategyEngineTests(unittest.TestCase):
         os.chdir(self.root)
         self.saved_env = {
             k: os.environ.get(k)
-            for k in ('LEMVO_MESSAGE_KIND', 'LEMVO_CURRENT_MESSAGE_PATH', 'LEMVO_MACRO_REVIEW_THRESHOLD', 'LEMVO_RESOURCE_WAKE')
+            for k in (
+                'LEMVO_MESSAGE_KIND', 'LEMVO_CURRENT_MESSAGE_PATH',
+                'LEMVO_MACRO_REVIEW_THRESHOLD', 'LEMVO_MACRO_REVIEW_MODE',
+                'LEMVO_RESOURCE_WAKE',
+            )
         }
         for k in self.saved_env:
             os.environ.pop(k, None)
@@ -50,12 +55,6 @@ class StrategyEngineTests(unittest.TestCase):
             else:
                 os.environ[k] = v
         self.tmp.cleanup()
-
-    def _run_cli(self, *args):
-        return subprocess.run(
-            [sys.executable, str(STRATEGY_PATH), '--root', str(self.root)] if False else [sys.executable, str(STRATEGY_PATH)] + list(args),
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
-        )
 
     def test_legacy_lemvo138_style_log_inference_saturation_and_dup(self):
         (self.root / 'logs').mkdir()
@@ -114,6 +113,62 @@ class StrategyEngineTests(unittest.TestCase):
         snap = strategy.analyze(self.root)
         self.assertEqual(len(snap['duplicate_warnings']), 1)
 
+    def test_variant_rejected_preserves_family_incubation_until_explicit_close(self):
+        subprocess.run(
+            [sys.executable, str(STRATEGY_PATH), 'portfolio-set', '--root', str(self.root),
+             '--slot', 'explore', '--family', 'new_branch', '--tier', 'T2',
+             '--incubation-budget', '3', '--hypothesis', 'Orthogonal objective'],
+            check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
+        )
+        (self.root / 'logs').mkdir(exist_ok=True)
+        rows = [
+            {'exp_id': 'nb_1', 'family_id': 'new_branch', 'intervention_tier': 'T2', 'metric': 0.50, 'outcome': 'complete', 'detail': 'implementation works'},
+            {'exp_id': 'nb_2', 'family_id': 'new_branch', 'intervention_tier': 'T2', 'metric': 0.49, 'outcome': 'rejected', 'detail': 'this variant rejected; family remains open'},
+        ]
+        (self.root / 'logs/experiments.jsonl').write_text('\n'.join(json.dumps(r) for r in rows) + '\n', encoding='utf-8')
+        snap = strategy.analyze(self.root)
+        self.assertEqual(snap['families']['new_branch']['status'], 'INCUBATING')
+        self.assertEqual(snap['families']['new_branch']['incubation_remaining'], 1)
+        self.assertTrue(snap['portfolio']['slots']['explore']['incubation_protected'])
+
+        # Explicit family-level closure closes the family and drops incubation protection
+        r_close = subprocess.run(
+            [sys.executable, str(STRATEGY_PATH), 'log-experiment', '--root', str(self.root),
+             '--exp-id', 'nb_3', '--family', 'new_branch', '--tier', 'T2',
+             '--metric', '0.48', '--outcome', 'REJECTED', '--family-status', 'closed',
+             '--detail', 'Formal family retirement after incubation diagnostic'],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True,
+        )
+        self.assertEqual(r_close.returncode, 0, r_close.stderr)
+        snap_closed = strategy.analyze(self.root)
+        self.assertEqual(snap_closed['families']['new_branch']['status'], 'CLOSED')
+        self.assertFalse(snap_closed['portfolio']['slots']['explore']['incubation_protected'])
+
+    def test_breakthrough_direction_and_uncalibrated_noise_guard(self):
+        # Negative delta + adverse CI + rejected must NEVER be breakthrough even if significant=True
+        self.assertFalse(strategy.is_breakthrough(
+            {'metric': 0.45, 'paired_ci': [-0.06, -0.04], 'outcome': 'rejected', 'significant': True},
+            0.50, 0.01, direction='maximize',
+        ))
+        self.assertFalse(strategy.is_breakthrough(
+            {'metric': 0.45, 'significant': True},
+            0.50, 0.01, direction='maximize',
+        ))
+        # Tiny positive improvement without noise_band or CI/significance is NOT breakthrough
+        self.assertFalse(strategy.is_breakthrough(
+            {'metric': 0.5000001, 'outcome': 'KEEP'},
+            0.50, None, direction='maximize',
+        ))
+        # Minimize direction: lower metric with negative CI is breakthrough; higher metric is not
+        self.assertTrue(strategy.is_breakthrough(
+            {'metric': 0.38, 'paired_ci': [-0.14, -0.09], 'outcome': 'KEEP', 'significant': True},
+            0.50, 0.02, direction='minimize',
+        ))
+        self.assertFalse(strategy.is_breakthrough(
+            {'metric': 0.55, 'paired_ci': [0.02, 0.08], 'outcome': 'rejected', 'significant': True},
+            0.50, 0.02, direction='minimize',
+        ))
+
     def test_noise_band_in_band_gain_does_not_reset_streak_but_breakthrough_does(self):
         (self.root / '.lemvo-strategy-policy.json').write_text(
             json.dumps({'macro_review_threshold': 4, 'noise_band': 0.03, 'direction': 'maximize'}),
@@ -130,6 +185,7 @@ class StrategyEngineTests(unittest.TestCase):
         (self.root / 'logs/experiments.jsonl').write_text('\n'.join(json.dumps(r) for r in in_band) + '\n', encoding='utf-8')
         snap = strategy.analyze(self.root)
         self.assertEqual(snap['incremental_streak'], 4)
+        self.assertEqual(snap['streak_since_last_review'], 4)
         self.assertTrue(snap['macro_review_armed'])
 
         # Adding a CI-excluding-0 breakthrough resets the streak
@@ -139,9 +195,63 @@ class StrategyEngineTests(unittest.TestCase):
         self.assertEqual(snap2['incremental_streak'], 0)
         self.assertFalse(snap2['macro_review_armed'])
 
-    def test_macro_review_gate_in_work_unit_guards_and_one_shot_settlement(self):
+    def test_default_advisory_preserves_planned_confirmations_and_full_cooldown(self):
         (self.root / '.lemvo-strategy-policy.json').write_text(
             json.dumps({'macro_review_threshold': 3, 'noise_band': 0.05}), encoding='utf-8'
+        )
+        Path('research-state.yaml').write_text(
+            'project:\n  objective: Estimate fixed protocol variability\n'
+            'prep:\n  next_min_probe: Complete the planned seed study\n',
+            encoding='utf-8',
+        )
+        Path('inp.md').write_text('runtime tick', encoding='utf-8')
+        (self.root / 'logs').mkdir()
+        rows = [
+            {'exp_id': 'seed0', 'family_id': 'base', 'intervention_tier': 'T0', 'metric': 0.50, 'outcome': 'completed'},
+            {'exp_id': 'seed1', 'family_id': 'base', 'intervention_tier': 'T0', 'metric': 0.50, 'outcome': 'completed'},
+            {'exp_id': 'seed2', 'family_id': 'base', 'intervention_tier': 'T0', 'metric': 0.50, 'outcome': 'completed'},
+            {'exp_id': 'seed3', 'family_id': 'base', 'intervention_tier': 'T0', 'metric': 0.50, 'outcome': 'completed'},
+        ]
+        (self.root / 'logs/experiments.jsonl').write_text('\n'.join(json.dumps(r) for r in rows) + '\n', encoding='utf-8')
+
+        td1 = Path('turns/t_adv_1')
+        td1.mkdir(parents=True)
+        plan1 = work.prepare(td1, 'inp.md', td1 / 'out.md', 'claude')
+        self.assertFalse(plan1['macro_review_triggered'])
+        self.assertTrue(plan1['macro_review_advisory'])
+        unit1 = work.load(td1 / 'work-unit.json')
+        self.assertEqual(unit1['kind'], 'research')
+        self.assertEqual(unit1['objective'], 'Complete the planned seed study')
+        self.assertIn('research-orchestrator/references/macro-strategy.md', unit1['relevant_skill_paths'])
+        prompt1 = (td1 / 'out.md').read_text(encoding='utf-8')
+        self.assertIn('PLATEAU ADVISORY', prompt1)
+        self.assertIn('RESEARCH STRATEGY LEDGER', prompt1)
+
+        (td1 / 'result.json').write_text(json.dumps({'status': 'succeeded', 'engine_rc': 0}), encoding='utf-8')
+        work.report(td1, 'completed', 'Finished planned seed 3')
+        work.settle(td1, 0)
+
+        # Adding 1 flat run must NOT immediately re-arm (cooldown = full threshold 3 new flat runs)
+        with (self.root / 'logs/experiments.jsonl').open('a', encoding='utf-8') as fh:
+            fh.write(json.dumps({'exp_id': 'seed4', 'family_id': 'base', 'intervention_tier': 'T0', 'metric': 0.50, 'outcome': 'completed'}) + '\n')
+        td2 = Path('turns/t_adv_2')
+        td2.mkdir(parents=True)
+        plan2 = work.prepare(td2, 'inp.md', td2 / 'out.md', 'claude')
+        self.assertFalse(plan2['macro_review_triggered'])
+        self.assertFalse(plan2['macro_review_advisory'])
+
+        # Adding 2 more flat runs (total 3 since last review) re-arms cleanly
+        with (self.root / 'logs/experiments.jsonl').open('a', encoding='utf-8') as fh:
+            fh.write(json.dumps({'exp_id': 'seed5', 'family_id': 'base', 'intervention_tier': 'T0', 'metric': 0.50, 'outcome': 'completed'}) + '\n')
+            fh.write(json.dumps({'exp_id': 'seed6', 'family_id': 'base', 'intervention_tier': 'T0', 'metric': 0.50, 'outcome': 'completed'}) + '\n')
+        td3 = Path('turns/t_adv_3')
+        td3.mkdir(parents=True)
+        plan3 = work.prepare(td3, 'inp.md', td3 / 'out.md', 'claude')
+        self.assertTrue(plan3['macro_review_advisory'])
+
+    def test_opt_in_macro_review_gate_in_work_unit_guards_and_cooldown(self):
+        (self.root / '.lemvo-strategy-policy.json').write_text(
+            json.dumps({'macro_review_threshold': 3, 'macro_review_mode': 'gate', 'noise_band': 0.05}), encoding='utf-8'
         )
         (self.root / '.lemvo-context.json').write_text(
             json.dumps({'schema': 'lemvo-context-runtime', 'schema_version': 1, 'sid': 'sid-1', 'engine': 'claude', 'successful_turns': 1, 'files': []}),
@@ -195,7 +305,7 @@ class StrategyEngineTests(unittest.TestCase):
         self.assertIn('OUTER_MACRO_REVIEW', prompt_m)
         self.assertTrue((td_m / 'strategy-snapshot.json').is_file())
 
-        # 4. Settling with rc=0 marks macro review handled (one-shot; next turn won't loop)
+        # 4. Settling with rc=0 marks macro review handled & respects full cooldown (+1 run stays unarmed)
         (td_m / 'result.json').write_text(json.dumps({'status': 'succeeded', 'engine_rc': 0}), encoding='utf-8')
         work.report(td_m, 'completed', 'Completed taxonomy and proposed T3 jump', next_objective='Run T3 pilot', next_kind='experiment', tier='T3', family='latent')
         work.settle(td_m, 0)
@@ -205,6 +315,13 @@ class StrategyEngineTests(unittest.TestCase):
         td_next.mkdir(parents=True)
         plan_after = work.prepare(td_next, 'inp.md', td_next / 'out.md', 'claude')
         self.assertFalse(plan_after['macro_review_triggered'])
+
+        with (self.root / 'logs/experiments.jsonl').open('a', encoding='utf-8') as fh:
+            fh.write(json.dumps({'exp_id': 'sft_4', 'family_id': 'sft', 'intervention_tier': 'T1', 'metric': 0.511, 'outcome': 'NULL'}) + '\n')
+        td_plus1 = Path('turns/t_plus1')
+        td_plus1.mkdir(parents=True)
+        plan_plus1 = work.prepare(td_plus1, 'inp.md', td_plus1 / 'out.md', 'claude')
+        self.assertFalse(plan_plus1['macro_review_triggered'])
 
     def test_portfolio_incubation_and_failure_taxonomy_surfacing(self):
         subprocess.run(
@@ -244,7 +361,7 @@ class StrategyEngineTests(unittest.TestCase):
             r'\btext\s*=',
             r'\bfromisoformat\b',
         ]
-        for path in (STRATEGY_PATH, WORK_UNIT_PATH):
+        for path in (STRATEGY_PATH, WORK_UNIT_PATH, JOB_EVENTS_PATH):
             src = path.read_text(encoding='utf-8')
             for pat in forbidden:
                 self.assertIsNone(re.search(pat, src), '%s matched forbidden py3.6 pattern %s' % (path.name, pat))

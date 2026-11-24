@@ -51,11 +51,11 @@ INNER LOOP（快速、分层记录、防重）
   结果记账：logs/experiments.jsonl + results.tsv；小正信号按 r29 A7 留证但不重置平台期计数
   成长期保护：新 T2/T3 explore 家族享 2-3 轮 INCUBATING 保护期，不因首跑粗版低于老 champion 即斩杀
 
-OUTER_MACRO_REVIEW（硬门控 + 错例第一性原理驱动）
-  触发条件：当连续 ≥5 轮已完成实验均为未破噪声带的 T0/T1 改动，work-unit.py 自动拦截
-           局部 next_task，以 fresh 会话派发 kind=macro_review
-  强制动作：1) 抽取 20-50 个失败样例写 Failure Taxonomy (record-failure-taxonomy)
-           2) 审视饱和/关闭家族，禁止继续在饱和家族堆叠 T1 参数或步数
+OUTER_MACRO_REVIEW（平台期提醒 / 可选强制门控 + 错例第一性原理驱动）
+  触发条件：自上次评审后累计 ≥5 轮无校准突破的 T0/T1 改动。默认 advisory 模式保留原定复现/
+           确认任务并注入 PLATEAU ADVISORY；仅当配置 macro_review_mode=gate 时才以 fresh 会话派发 kind=macro_review
+  探索建议：1) 处于开放探索而非既定复测时，先抽 20-50 个失败样例写 Failure Taxonomy (record-failure-taxonomy)
+           2) 单次变体 rejected 不关停整个家族；仅在显式家族级退休决定后才停止对饱和老家族堆叠 T1
            3) 结合 brainstorming-research-ideas 与 paradigm-shift-probe 产出正交 T2/T3 方案
               → DEEPEN（深挖有效新机制）/ BROADEN / PIVOT / 约束复审 / CONCLUDE
 

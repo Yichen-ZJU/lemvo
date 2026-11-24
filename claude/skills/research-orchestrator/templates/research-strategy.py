@@ -3,7 +3,7 @@
 
 This module provides deterministic experiment family saturation analysis,
 config duplicate detection, portfolio incubation tracking, failure-taxonomy
-persistence, and plateau/incrementalism detection for Lemvo v2.
+persistence, and plateau/incrementalism detection for Lemvo v2.1.
 Python 3.6+ stdlib only.
 """
 import argparse
@@ -27,9 +27,11 @@ EXPERIMENTS_LOG = 'logs/experiments.jsonl'
 RESULTS_TSV = 'results.tsv'
 TAXONOMY_LOG = 'logs/failure-taxonomy.jsonl'
 VALID_TIERS = ('T0', 'T1', 'T2', 'T3')
+VALID_REVIEW_MODES = ('advisory', 'gate')
 DEFAULT_POLICY = {
     'enabled': True,
     'macro_review_threshold': 5,
+    'macro_review_mode': 'advisory',
     'incubation_budget': 3,
     'family_saturation_runs': 4,
     'noise_band': None,
@@ -45,6 +47,14 @@ _NULL_VERDICT_PATTERNS = (
     'additive-neutral', 'not confirmed', 'acceptance gate missed',
     'within seed band', 'within +/-', 'null on primary', 'duplicate-of',
     'same-config replicate', 'does not exceed', 'missed by', 'below every component',
+)
+_FAMILY_CLOSED_NEGATIONS = (
+    'family remains open', 'family open', 'keep family', 'direction remains open',
+    'continue family', 'remains open',
+)
+_FAMILY_CLOSED_RE = re.compile(
+    r'\bfamil(?:y|ies)\s+(?:is\s+|are\s+)?closed\b|\bclose_family\b|\bfamily_status\s*[:=]\s*closed\b',
+    re.I,
 )
 _T0_KEYWORDS = (
     'baseline', 'seedvar', 'seed_var', 'seed2', 'seed_match', 'replicate',
@@ -144,6 +154,13 @@ def _normalize_direction(val):
     return None
 
 
+def _normalize_review_mode(val):
+    s = str(val or '').strip().lower()
+    if s in VALID_REVIEW_MODES:
+        return s
+    return None
+
+
 def _state_strategy_hints(root):
     p = Path(root) / 'research-state.yaml'
     if not p.is_file():
@@ -180,6 +197,10 @@ def _state_strategy_hints(root):
                 hints['macro_review_threshold'] = int(v)
             except ValueError:
                 pass
+        elif k == 'macro_review_mode' and in_strategy:
+            rm = _normalize_review_mode(v)
+            if rm:
+                hints['macro_review_mode'] = rm
         elif k == 'incubation_budget' and in_strategy:
             try:
                 hints['incubation_budget'] = max(1, int(v))
@@ -211,6 +232,9 @@ def load_policy(root=Path('.')):
         d = _normalize_direction(file_pol.get('direction'))
         if d:
             pol['direction'] = d
+        rm = _normalize_review_mode(file_pol.get('macro_review_mode'))
+        if rm:
+            pol['macro_review_mode'] = rm
     env_thr = os.environ.get('LEMVO_MACRO_REVIEW_THRESHOLD')
     if env_thr is not None and env_thr.strip() != '':
         try:
@@ -219,6 +243,9 @@ def load_policy(root=Path('.')):
                 pol['macro_review_threshold'] = n
         except ValueError:
             pass
+    env_mode = _normalize_review_mode(os.environ.get('LEMVO_MACRO_REVIEW_MODE'))
+    if env_mode:
+        pol['macro_review_mode'] = env_mode
     return pol
 
 
@@ -406,6 +433,17 @@ def _extract_ci(record):
     lo, hi = _to_float(record.get('ci_low')), _to_float(record.get('ci_high'))
     if lo is not None and hi is not None:
         return min(lo, hi), max(lo, hi)
+    txt = ' '.join(
+        str(record.get(k) or '')
+        for k in ('detail', 'outcome', 'verdict', 'notes', 'description')
+    )
+    m = re.search(
+        r'\bci(?:\s*95)?\s*[:=]?\s*\[\s*([+-]?\d+(?:\.\d+)?)\s*,\s*([+-]?\d+(?:\.\d+)?)\s*\]',
+        txt, re.I,
+    )
+    if m:
+        lo, hi = float(m.group(1)), float(m.group(2))
+        return min(lo, hi), max(lo, hi)
     return None
 
 
@@ -436,36 +474,62 @@ def _has_duplicate_marker(record):
     return m.group(1) if m else None
 
 
+def _is_explicit_family_closure(record):
+    if record.get('close_family') is True:
+        return True
+    if str(record.get('family_status') or '').strip().lower() == 'closed':
+        return True
+    if str(record.get('family_decision') or '').strip().lower() in ('closed', 'close_family', 'retire_family'):
+        return True
+    txt = ' '.join(str(record.get(k) or '') for k in ('outcome', 'verdict', 'detail'))
+    low = txt.lower()
+    if any(neg in low for neg in _FAMILY_CLOSED_NEGATIONS):
+        return False
+    return bool(_FAMILY_CLOSED_RE.search(txt))
+
+
+def _is_explicit_family_reopen(record):
+    if record.get('reopen_family') is True:
+        return True
+    if str(record.get('family_status') or '').strip().lower() == 'active':
+        return True
+    return False
+
+
 def is_breakthrough(record, best_so_far, noise_band, direction='maximize'):
     if not is_completed(record):
         return False
-    sig = record.get('significant')
-    if isinstance(sig, bool):
-        return sig
-
     if _has_duplicate_marker(record):
+        return False
+    if _has_null_verdict(record):
+        return False
+
+    metric = _extract_metric(record)
+    delta = None
+    if metric is not None and best_so_far is not None:
+        delta = (best_so_far - metric) if direction == 'minimize' else (metric - best_so_far)
+        if delta <= 0.0:
+            return False
+
+    sig = record.get('significant')
+    if sig is False:
         return False
 
     ci = _extract_ci(record)
     if ci is not None:
         lo, hi = ci
-        if direction == 'minimize' and hi < 0.0:
-            return not _has_null_verdict(record)
-        if direction != 'minimize' and lo > 0.0:
-            return not _has_null_verdict(record)
-        if lo <= 0.0 <= hi:
-            return False
+        if direction == 'minimize':
+            return hi < 0.0
+        return lo > 0.0
 
-    if _has_null_verdict(record):
+    if sig is True:
+        return (delta is not None and delta > 0.0) or (metric is None and best_so_far is None)
+
+    if delta is None or delta <= 0.0:
         return False
-
-    metric = _extract_metric(record)
-    if metric is None or best_so_far is None:
-        return False
-
-    delta = (best_so_far - metric) if direction == 'minimize' else (metric - best_so_far)
-    threshold = float(noise_band) if (noise_band is not None and noise_band > 0) else 0.0
-    return delta > threshold
+    if noise_band is not None and noise_band > 0:
+        return delta > float(noise_band)
+    return False
 
 
 def load_failure_taxonomies(root=Path('.')):
@@ -550,12 +614,18 @@ def analyze(root=Path('.')):
             'best_metric': None,
             'breakthroughs': 0,
             'recent_outcomes': [],
+            'explicit_family_closed': False,
             'status': 'ACTIVE',
             'incubation_remaining': 0,
         })
         finfo['runs'] += 1
         if tier not in finfo['tiers']:
             finfo['tiers'].append(tier)
+        if _is_explicit_family_closure(rec):
+            finfo['explicit_family_closed'] = True
+        elif _is_explicit_family_reopen(rec):
+            finfo['explicit_family_closed'] = False
+
         if completed:
             completed_experiments += 1
             finfo['completed_runs'] += 1
@@ -568,8 +638,7 @@ def analyze(root=Path('.')):
                     finfo['best_metric'] = max(finfo['best_metric'], metric)
 
             bt = is_breakthrough(rec, anchor_best, noise_band, direction)
-            out_txt = ' '.join(str(rec.get(k) or '') for k in ('outcome', 'verdict', 'detail')).lower()
-            finfo['recent_outcomes'].append({'bt': bt, 'closed': ('closed' in out_txt or 'rejected' in out_txt)})
+            finfo['recent_outcomes'].append({'bt': bt})
             if anchor_best is None and metric is not None:
                 anchor_best = metric
                 if tier in ('T2', 'T3') and bt:
@@ -604,6 +673,7 @@ def analyze(root=Path('.')):
             'best_metric': None,
             'breakthroughs': 0,
             'recent_outcomes': [],
+            'explicit_family_closed': False,
             'status': 'ACTIVE',
             'incubation_remaining': 0,
         })
@@ -616,17 +686,18 @@ def analyze(root=Path('.')):
         inc_budget = int(slot.get('incubation_budget') or pol['incubation_budget']) if slot else pol['incubation_budget']
         cruns = finfo['completed_runs']
         recent = finfo['recent_outcomes'][-sat_runs:]
-        explicitly_closed = (slot and str(slot.get('status') or '').lower() == 'closed') or any(
-            x['closed'] for x in finfo['recent_outcomes'][-2:]
+        explicitly_closed = bool(
+            (slot and str(slot.get('status') or '').lower() == 'closed')
+            or finfo.get('explicit_family_closed')
         )
         has_t2_t3 = any(t in ('T2', 'T3') for t in finfo['tiers'])
-        if explicitly_closed and cruns >= 2:
+        if explicitly_closed:
             finfo['status'] = 'CLOSED'
             finfo['incubation_remaining'] = 0
         elif slot and str(slot.get('status') or '').lower() != 'closed' and cruns < inc_budget:
             finfo['status'] = 'INCUBATING'
             finfo['incubation_remaining'] = max(0, inc_budget - cruns)
-        elif has_t2_t3 and 0 < cruns < inc_budget and not (finfo['recent_outcomes'] and finfo['recent_outcomes'][-1]['closed']):
+        elif has_t2_t3 and 0 < cruns < inc_budget:
             finfo['status'] = 'INCUBATING'
             finfo['incubation_remaining'] = max(0, inc_budget - cruns)
         elif cruns >= sat_runs and not any(x['bt'] for x in recent):
@@ -636,6 +707,7 @@ def analyze(root=Path('.')):
             finfo['status'] = 'ACTIVE'
             finfo['incubation_remaining'] = 0
         finfo.pop('recent_outcomes', None)
+        finfo.pop('explicit_family_closed', None)
 
     enriched_portfolio = dict(portfolio)
     if slots:
@@ -655,11 +727,12 @@ def analyze(root=Path('.')):
 
     last_mr_count = int(state.get('last_macro_review_exp_count') or 0)
     thr = pol['macro_review_threshold']
+    since_last_review = completed_experiments if last_mr_count <= 0 else max(0, completed_experiments - last_mr_count)
+    streak_since_last_review = min(incremental_streak, since_last_review)
     armed = bool(
         pol['enabled']
         and thr > 0
-        and incremental_streak >= thr
-        and last_mr_count < completed_experiments
+        and streak_since_last_review >= thr
     )
 
     return {
@@ -669,7 +742,9 @@ def analyze(root=Path('.')):
         'completed_experiments': completed_experiments,
         'tier_counts': tier_counts,
         'incremental_streak': incremental_streak,
+        'streak_since_last_review': streak_since_last_review,
         'macro_review_threshold': thr,
+        'macro_review_mode': pol['macro_review_mode'],
         'noise_band_used': noise_band,
         'direction': direction,
         'anchor_best': anchor_best,
@@ -686,12 +761,14 @@ def render_ledger_text(snapshot, max_lines=30):
     tc = snapshot.get('tier_counts', {})
     lines = [
         'RESEARCH STRATEGY LEDGER (anti-incrementalism telemetry; read-only summary):',
-        '- Totals: experiments=%d completed=%d | tiers T0=%d T1=%d T2=%d T3=%d | incremental_streak=%d/%d | macro_review_armed=%s' % (
+        '- Totals: experiments=%d completed=%d | tiers T0=%d T1=%d T2=%d T3=%d | incremental_streak=%d (since_review=%d/%d) | mode=%s | macro_review_armed=%s' % (
             snapshot.get('total_experiments', 0),
             snapshot.get('completed_experiments', 0),
             tc.get('T0', 0), tc.get('T1', 0), tc.get('T2', 0), tc.get('T3', 0),
             snapshot.get('incremental_streak', 0),
+            snapshot.get('streak_since_last_review', snapshot.get('incremental_streak', 0)),
             snapshot.get('macro_review_threshold', 0),
+            snapshot.get('macro_review_mode', 'advisory'),
             'YES' if snapshot.get('macro_review_armed') else 'no',
         ),
     ]
@@ -745,7 +822,9 @@ def mark_macro_review(root, turn_id, exp_count=None):
         'last_macro_review_exp_count': count,
         'last_macro_review_turn_id': str(turn_id),
         'incremental_streak': snap['incremental_streak'],
+        'streak_since_last_review': max(0, snap['completed_experiments'] - count),
         'macro_review_armed': False,
+        'macro_review_mode': snap.get('macro_review_mode', 'advisory'),
         'tier_counts': snap['tier_counts'],
         'updated_utc': now_utc(),
     }
@@ -823,6 +902,8 @@ def cmd_log_experiment(args):
         rec['ci_low'] = args.ci_low
         rec['ci_high'] = args.ci_high
         rec['paired_ci'] = [args.ci_low, args.ci_high]
+    if args.family_status is not None:
+        rec['family_status'] = args.family_status
     if args.detail is not None:
         rec['detail'] = args.detail
     locked_append_jsonl(root / EXPERIMENTS_LOG, rec)
@@ -894,6 +975,7 @@ def main(argv=None):
     p.add_argument('--significant')
     p.add_argument('--ci-low', type=float)
     p.add_argument('--ci-high', type=float)
+    p.add_argument('--family-status', choices=('active', 'closed'))
     p.add_argument('--detail')
     p.add_argument('--allow-duplicate', action='store_true')
 

@@ -1,3 +1,9 @@
+## 2026-11-24 (v2.1) — Job-Event Attempt/Harvest Hardening & Strategy Calibration Fixes
+
+- Hardened `skills/research-orchestrator/templates/job-events.py` (and `console/lemvo_console/collector.py`): require terminal status and non-empty `harvest_summary`/`harvest_cycle` (or explicit `harvested: true`) for `already_harvested` with newer-attempt/failure invalidation and zero unverified `succeeded` fallbacks; isolate explicit completion sentinels (`done_file`/`done_path`/`terminal_receipt`/`wait_file`) from generic `result_path`/`result_file` so plain progress logs yield `non-terminal`/`running`/`unknown` rather than `succeeded`; and bind `classify`/`producer_started`/stale-failure filtering/event keys to the verified `active_attempt(job)` while requiring `/proc` cmdline corroboration before accepting an unbound `resume_pid`.
+- Hardened `skills/research-orchestrator/templates/research-strategy.py`, `work-unit.py`, and `references/macro-strategy.md` / `SKILL.md`: prevent single-run `rejected` outcomes from closing entire families or stripping `INCUBATING` protection; enforce favorable `direction` checks and calibrated noise/CI guards in `is_breakthrough()`; reset macro-review cooldown strictly from `last_macro_review_exp_count`; and default plateau handling to non-hijacking `macro_review_mode: advisory` (with opt-in `gate`) so scheduled replications and confirmations run uninterrupted.
+- Expanded `tests/research_strategy_test.py` (including `job-events.py` Python 3.6 static guard), `tests/runtime_job_events_test.py`, and `console/tests/test_console.py` across all 4 distribution trees and 3 repositories.
+
 # 2026-11-10 — Neighbor mechanisms in method generation
 
 ## 2026-11-24 — Lemvo v2 Strategy Engine, Intervention Tiers, Hard Macro-Review & Anti-Incrementalism

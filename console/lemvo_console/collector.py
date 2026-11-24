@@ -244,7 +244,13 @@ def describe_job(item, project, processes, previous, now, stall_seconds, state_d
     status = str(item.get('status', 'unknown')).lower()
     job = {'id': key(project, run_id, pid), 'run_id': run_id, 'pid': pid, 'pid_start': start,
            'session_id': item.get('session_id'), 'status': status, 'alive': alive,
-           'already_harvested': bool(item.get('harvested') is True or item.get('harvest_summary') is not None),
+           'already_harvested': bool(
+               not alive and (
+                   item.get('harvested') is True
+                   or (isinstance(item.get('harvest_summary'), str) and item.get('harvest_summary').strip())
+                   or (item.get('harvest_cycle') is not None and not isinstance(item.get('harvest_cycle'), bool) and str(item.get('harvest_cycle')).strip())
+               )
+           ),
            'phase': 'unknown', 'detail': '', 'progress': None, 'last_progress_at': None,
            'health': 'unknown', 'log_tail': '', 'warning': None}
     result_path = (item.get('result_file') or item.get('done_file')

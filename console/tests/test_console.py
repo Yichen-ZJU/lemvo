@@ -363,6 +363,18 @@ class ControlsTests(BaseFixture):
         self.assertEqual(proj['jobs'][0]['status'], 'succeeded')
         self.assertTrue(proj['jobs'][0]['already_harvested'])
 
+    def test_blank_harvest_summary_not_marked_harvested(self):
+        self.store.register(self.project)
+        result = self.project / 'sub/result.json'
+        atomic(result, {'run_id': 'fit-blank', 'status': 'succeeded', 'exit_code': 0})
+        atomic(self.project / '.lemvo-jobs.json', [
+            {'run_id': 'fit-blank', 'pid': 111, 'pid_start': '12', 'done_path': 'sub/result.json', 'harvest_summary': ''}
+        ])
+        collector = Collector(self.store, self.home)
+        with patch.object(collector.processes, 'scan', return_value=None), patch('lemvo_console.collector.tmux_panes', return_value={}), patch.object(collector, 'hardware', return_value={}):
+            s = collector.collect()
+        self.assertFalse(s['projects'][0]['jobs'][0]['already_harvested'])
+
     def test_strategy_state_and_macro_review_visibility(self):
         self.store.register(self.project)
         atomic(self.project / '.lemvo-strategy-state.json', {

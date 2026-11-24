@@ -444,13 +444,16 @@ def prepare(td, source, target, engine='codex', session_file='.autoloop-session-
         str(j.get('status') or '').lower() in ('running', 'pending', 'queued', 'active')
         for j in jobs
     )
-    macro_review_active = bool(
+    strategy_mode = str((strategy or {}).get('macro_review_mode') or 'advisory').lower()
+    plateau_ready = bool(
         strategy
         and strategy.get('macro_review_armed') is True
         and os.environ.get('LEMVO_MESSAGE_KIND') != 'user'
         and not was_waiting
         and not active_job_running
     )
+    macro_review_active = bool(plateau_ready and strategy_mode == 'gate')
+    macro_review_advisory = bool(plateau_ready and strategy_mode != 'gate')
     deferred_objective = None
     if macro_review_active:
         deferred_objective = objective
@@ -474,6 +477,9 @@ def prepare(td, source, target, engine='codex', session_file='.autoloop-session-
             files.append(f)
     refs = [{'path': f['path'], 'fingerprint': f['fingerprint'],
              'fingerprint_basis': f['fingerprint_basis'], 'bytes': f['bytes']} for f in files]
+    rel_skills = list(skill_paths(kind))
+    if macro_review_advisory and 'research-orchestrator/references/macro-strategy.md' not in rel_skills:
+        rel_skills.append('research-orchestrator/references/macro-strategy.md')
     task = {'schema': 'lemvo-work-unit', 'schema_version': VERSION,
             'turn_id': td.name, 'kind': str(kind), 'objective': objective,
             'objective_source': origin, 'phase': phase, 'method_branch': branch,
@@ -481,7 +487,7 @@ def prepare(td, source, target, engine='codex', session_file='.autoloop-session-
             'mode': text('.lemvo-mode').strip() or 'unspecified', 'engine': engine,
             'current_input_kind': os.environ.get('LEMVO_MESSAGE_KIND', 'runtime'),
             'jobs': jobs, 'source_refs': refs,
-            'relevant_skill_paths': skill_paths(kind),
+            'relevant_skill_paths': rel_skills,
             'previous_result': '.lemvo-last-work-result.json' if last else None,
             'result_path': str(td / 'work-result.json')}
     if has_strategy_data:
@@ -493,8 +499,11 @@ def prepare(td, source, target, engine='codex', session_file='.autoloop-session-
         strategy_summary = {
             'completed_experiments': strategy.get('completed_experiments', 0),
             'incremental_streak': strategy.get('incremental_streak', 0),
+            'streak_since_last_review': strategy.get('streak_since_last_review', 0),
             'macro_review_threshold': strategy.get('macro_review_threshold', 0),
+            'macro_review_mode': strategy_mode,
             'macro_review_triggered': macro_review_active,
+            'macro_review_advisory': macro_review_advisory,
             'tier_counts': strategy.get('tier_counts', {}),
             'duplicate_warnings_count': len(strategy.get('duplicate_warnings') or []),
             'incubating_families': incubating,
@@ -508,6 +517,8 @@ def prepare(td, source, target, engine='codex', session_file='.autoloop-session-
             'phase': phase, 'branch': branch, 'policy': p,
             'adopted_session': reason == 'adopt-existing-session',
             'macro_review_triggered': macro_review_active,
+            'macro_review_advisory': macro_review_advisory,
+            'macro_review_mode': strategy_mode,
             'macro_review_exp_count': strategy.get('completed_experiments', 0) if strategy else 0,
             'files': refs, 'created_utc': now(), 'created_epoch': time.time()}
     parts = [
@@ -544,11 +555,24 @@ def prepare(td, source, target, engine='codex', session_file='.autoloop-session-
     if has_strategy_data and smod is not None:
         if macro_review_active:
             parts.append(
-                'MACRO REVIEW GATE TRIGGERED (incremental_streak=%d/%d): '
+                'MACRO REVIEW GATE TRIGGERED (streak_since_last_review=%d/%d, total_streak=%d): '
                 'Tactical next_task deferred (%s). Conduct Error-Driven First-Principles diagnosis and T2/T3 synthesis per macro-strategy.md.' % (
-                    strategy.get('incremental_streak', 0),
+                    strategy.get('streak_since_last_review', 0),
                     strategy.get('macro_review_threshold', 0),
+                    strategy.get('incremental_streak', 0),
                     str(deferred_objective or '')[:300],
+                )
+            )
+        elif macro_review_advisory:
+            parts.append(
+                'PLATEAU ADVISORY (streak_since_last_review=%d/%d, total_streak=%d): '
+                'Multiple recent T0/T1 runs did not exceed calibrated breakthrough criteria. '
+                'If your current task is a planned replication, confirmation draw, or justified step, proceed directly. '
+                'If in open exploration on a saturating family, consider inspecting 20-50 concrete failure cases '
+                '(record-failure-taxonomy), opening an orthogonal T2/T3 explore slot (portfolio-set), or explicitly retiring a closed family.' % (
+                    strategy.get('streak_since_last_review', 0),
+                    strategy.get('macro_review_threshold', 0),
+                    strategy.get('incremental_streak', 0),
                 )
             )
         parts.append(smod.render_ledger_text(strategy))
@@ -775,7 +799,7 @@ def settle(td, rc=0, session_file='.autoloop-session-id'):
                 atomic(LAST_RESULT, result)
         atomic(td/'work-settlement.json', {'successful': True, 'turn_id': td.name,
                                         'recorded_utc': now()})
-        if plan.get('macro_review_triggered'):
+        if plan.get('macro_review_triggered') or plan.get('macro_review_advisory'):
             smod = _load_strategy_module()
             if smod is not None:
                 try:
