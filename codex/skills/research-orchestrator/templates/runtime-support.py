@@ -12,25 +12,20 @@ import fnmatch
 import sqlite3
 import math
 import signal
+import socket
 import subprocess
 
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import lemvo_common as _lc
 
-def atomic(path, value):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name('.' + path.name + '.' + uuid.uuid4().hex)
-    with open(str(tmp), 'w', encoding='utf-8') as f:
-        f.write(value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2))
-        f.flush()
-        os.fsync(f.fileno())
-    os.replace(str(tmp), str(path))
+
+def atomic(path, value, compact=False):
+    _lc.atomic_write(path, value, indent=2, fsync=True, compact=compact)
 
 
 def load(path, default=None):
-    try:
-        return json.loads(Path(path).read_text(encoding='utf-8'))
-    except (OSError, ValueError):
-        return default
+    return _lc.load_json(path, default=default, encoding='utf-8')
 
 
 def epoch():
@@ -196,15 +191,7 @@ def register_wait():
     atomic('.lemvo-resource-wait.json',p)
 
 
-def process_identity(pid):
-    try:
-        p = int(pid)
-        if p <= 0:
-            return None
-        fields = Path('/proc/%d/stat' % p).read_text().rsplit(')', 1)[1].split()
-        return None if fields[0] == 'Z' else fields[19]
-    except (OSError, ValueError, TypeError, IndexError):
-        return None
+process_identity = _lc.process_start_ticks
 
 
 def execution_lease(owner_pid, owner_start, ready_path, token):
@@ -316,7 +303,7 @@ def progress_snapshot(target):
         if not stats['complete']: break
     db.commit(); db.close()
     stats['elapsed_sec']=time.monotonic()-started
-    atomic(target,{'schema':2,'files':result,'inspection':stats})
+    atomic(target,{'schema':2,'files':result,'inspection':stats}, compact=True)
     atomic('.lemvo-progress-inspection.json',stats)
 
 
@@ -574,12 +561,7 @@ def delivery(kind, list_file, turn_id=''):
 def inventory():
     """Read-only takeover inventory, no automatic termination of unknown processes."""
     project = Path.cwd().resolve()
-    ancestors = set()
-    pid = os.getpid()
-    while pid > 1:
-        ancestors.add(pid)
-        try: pid = int(Path('/proc/%d/stat' % pid).read_text().rsplit(')',1)[1].split()[1])
-        except (OSError, ValueError, IndexError): break
+    ancestors = _lc.ancestor_pids()
     candidates = []
     for proc in Path('/proc').iterdir():
         if not proc.name.isdigit() or int(proc.name) in ancestors:
@@ -604,7 +586,8 @@ def doctor(controller):
     current = Path(controller).resolve()
     report['invoked_controller'] = str(current)
     report['sha256'] = hashlib.sha256(current.read_bytes()).hexdigest()
-    bundle=('lemvo-run.sh','autoloop-reference.sh','runtime-support.py','runtime-contract.py','work-unit.py',
+    bundle=('lemvo-run.sh','autoloop-reference.sh','autoloop-helper.py','lemvo_common.py',
+            'runtime-support.py','runtime-contract.py','runtime-idle.py','work-unit.py',
             'job-events.py','configure-event-runtime.py','event-wait.py','runtime-heartbeat.py','native-event-owner.py')
     report['bundle']={name:hashlib.sha256((current.parent/name).read_bytes()).hexdigest()
         if (current.parent/name).is_file() else None for name in bundle}
@@ -761,6 +744,121 @@ def watch_turn(td, tid, pid, identity):
         time.sleep(cfg['POLL_SEC'])
 
 
+
+def receipts_pending(directory='.lemvo-receipts', limit=20):
+    d = Path(directory)
+    out = []
+    if d.is_dir():
+        for p in sorted(d.glob('*.json')):
+            rec = load(p, None)
+            if isinstance(rec, dict) and not rec.get('consumed'):
+                out.append(str(p))
+                if len(out) >= int(limit):
+                    break
+    if out:
+        print('\n'.join(out))
+
+
+def receipts_format(out_file, receipt_paths):
+    lines = ['以下后台作业已出结果（回执，未消费）：']
+    for rp in receipt_paths:
+        r = load(rp, None)
+        if not isinstance(r, dict):
+            continue
+        rf = r.get('result_file')
+        rf_note = (' result_file=%s' % rf) if rf else ''
+        lines.append('- %s: status=%s run_id=%s exit_code=%s done_file=%s%s (run 事实；请读结果、改方法、继续；勿重跑同 run_id)' % (
+            r.get('name'), r.get('status'), r.get('run_id'), r.get('exit_code'), r.get('done_file'), rf_note))
+        payload = {'metrics': r.get('metrics'), 'result': r.get('result')}
+        if any(v is not None for v in payload.values()):
+            encoded = json.dumps(payload, ensure_ascii=False)
+            if len(encoded) <= 5000:
+                lines.append('  Recorded producer result (scope/settings remain as supplied): ' + encoded)
+            else:
+                lines.append('  Large producer result retained in receipt %s; read the relevant fields rather than the full training log.' % rp)
+    atomic(out_file, '\n'.join(lines) + '\n')
+
+
+def receipts_consume(list_file):
+    lp = Path(list_file)
+    if not lp.is_file():
+        return
+    for raw in lp.read_text(encoding='utf-8', errors='replace').splitlines():
+        rp = raw.strip()
+        if not rp or not Path(rp).is_file():
+            continue
+        rec = load(rp, None)
+        if isinstance(rec, dict):
+            rec['consumed'] = True
+            _lc.atomic_write(rp, rec, indent=1, fsync=True)
+
+
+def turn_manifest_begin(td, tid, proj, cpid, engine=''):
+    td_path = Path(td)
+    td_path.mkdir(parents=True, exist_ok=True)
+    host = socket.gethostname()
+    man = {
+        'schema_version': 1,
+        'schema': 'lemvo-turn-manifest',
+        'session_epoch': epoch(),
+        'campaign_id': host + ':' + Path(proj).resolve().name,
+        'turn_id': tid,
+        'host': host,
+        'controller_pid': int(cpid) if str(cpid).isdigit() else None,
+        'engine': engine,
+        'status': 'dispatched',
+        'started_utc': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+    }
+    _lc.atomic_write(td_path / 'manifest.json', man, indent=1, fsync=False)
+    turn_register(td)
+
+
+def turn_result_confirm(td):
+    td_path = Path(td)
+    res_p = td_path / 'result.json'
+    if res_p.is_file():
+        r = load(res_p, {})
+        if not isinstance(r, dict):
+            r = {}
+        jb = td_path / 'job-batch.list'
+        sp = td_path / 'steer-published.list'
+        if jb.is_file():
+            jobs = [os.path.splitext(os.path.basename(l.strip()))[0]
+                    for l in jb.read_text(encoding='utf-8', errors='replace').splitlines() if l.strip()]
+            if jobs:
+                r['job_ids'] = jobs
+        if sp.is_file():
+            steers = [os.path.basename(l.strip())
+                      for l in sp.read_text(encoding='utf-8', errors='replace').splitlines() if l.strip()]
+            if steers:
+                r['steer_ids'] = steers
+        _lc.atomic_write(res_p, r, indent=1, fsync=False)
+    recovery_mark(td, 'settled', 'confirmed')
+
+
+def takeover_summary(inv_path):
+    report = load(inv_path, {}) or {}
+    candidates = report.get('legacy_candidates', [])
+    if candidates:
+        print('Takeover notice: project-associated legacy automation PIDs=%s; inspect .lemvo-takeover-inventory.json (not terminated).' %
+              ','.join(str(c['pid']) for c in candidates))
+    drift = [c for c in report.get('installed_candidates', []) if not c.get('matches_invoked')]
+    if drift:
+        print('Runtime version notice: invoked script differs from installed candidates; use doctor before a controlled migration.')
+
+
+def engine_json_pids(ej_path):
+    d = load(ej_path, {}) or {}
+    print(d.get('pid_engine', ''))
+    print(d.get('pid_engine_start', ''))
+
+
+def resource_wait_poll(default_poll='15'):
+    d = load('.lemvo-resource-wait.json', {}) or {}
+    val = d.get('poll_sec')
+    print(val if val is not None else default_poll)
+
+
 if __name__ == '__main__':
     cmd = sys.argv[1]
     if cmd == 'bootstrap': bootstrap()
@@ -783,4 +881,12 @@ if __name__ == '__main__':
     elif cmd == 'watch-turn': raise SystemExit(watch_turn(*sys.argv[2:6]))
     elif cmd == 'renew-turn': renew_turn(sys.argv[2])
     elif cmd == 'execution-lease': raise SystemExit(execution_lease(*sys.argv[2:6]))
+    elif cmd == 'receipts-pending': receipts_pending(*sys.argv[2:4])
+    elif cmd == 'receipts-format': receipts_format(sys.argv[2], sys.argv[3:])
+    elif cmd == 'receipts-consume': receipts_consume(sys.argv[2])
+    elif cmd == 'turn-manifest-begin': turn_manifest_begin(*sys.argv[2:7])
+    elif cmd == 'turn-result-confirm': turn_result_confirm(sys.argv[2])
+    elif cmd == 'takeover-summary': takeover_summary(sys.argv[2])
+    elif cmd == 'engine-json-pids': engine_json_pids(sys.argv[2])
+    elif cmd == 'resource-wait-poll': resource_wait_poll(*sys.argv[2:3])
     else: raise SystemExit(64)

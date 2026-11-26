@@ -11,7 +11,6 @@ import argparse
 import datetime
 import fcntl
 import hashlib
-import importlib.util
 import json
 import os
 import re
@@ -25,45 +24,34 @@ except (AttributeError, OSError):
     BOOT_EPOCH = time.time() - float(Path('/proc/uptime').read_text().split()[0])
 TICKS_PER_SECOND = os.sysconf('SC_CLK_TCK')
 
-_HARD_STATUSES = frozenset(('STOP', 'STOPPED', 'PAUSED'))
-_HUMAN_STATUSES = frozenset(('WAITING_USER', 'HOLD', 'EVIDENCE_HOLD', 'STOPPED_INCONCLUSIVE',
-                             'BLOCKED', 'BLOCKED_USER', 'BLOCKED-USER'))
-_DONE_STATUSES = frozenset(('COMPLETED', 'CONCLUDED', 'CAMPAIGN_DONE', 'CAMPAIGN-DONE'))
-_INVALID_CAP_SOURCES = frozenset(('', 'unknown', 'none', 'null', '-', 'n/a'))
-
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import lemvo_common as _lc
 
 def read(path, default=None):
-    try:
-        return json.loads(Path(path).read_text())
-    except (OSError, ValueError):
-        return {} if default is None else default
+    res = _lc.load_json(path, None)
+    if res is not None:
+        return res
+    return {} if default is None else default
 
 
 def save(path, value):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    temp = path.with_name('.' + path.name + '.owner-' + str(os.getpid()))
-    temp.write_text(json.dumps(value, ensure_ascii=False, indent=2))
-    os.replace(temp, path)
+    _lc.atomic_write(path, value, indent=2, fsync=False)
 
 
 def identity(pid):
-    try:
-        pid = int(pid)
-        p = Path('/proc') / str(pid)
-        fields = (p / 'stat').read_text().rsplit(')', 1)[1].split()
-        return dict(pid=pid, start=fields[19], state=fields[0],
-                    uid=p.stat().st_uid,
-                    argv=(p / 'cmdline').read_bytes().split(b'\0'))
-    except (OSError, ValueError, TypeError, IndexError):
+    item = _lc.proc_identity(pid, include_argv=True)
+    if not item:
         return None
+    return dict(pid=item['pid'], start=item['start'], state=item['state'],
+                uid=item['uid'], argv=item['argv'])
 
 
 def alive(record):
-    now = identity(record.get('pid')) if isinstance(record, dict) else None
-    return bool(now and now['state'] not in ('Z', 'X') and
-                now['uid'] == os.getuid() and
-                str(record.get('start', record.get('pid_start'))) == now['start'])
+    if not isinstance(record, dict):
+        return False
+    expected = record.get('start', record.get('pid_start'))
+    return _lc.pid_alive(record.get('pid'), str(expected), require_same_uid=True)
 
 
 def append(path, item):
@@ -100,95 +88,17 @@ def tail_session_id(path):
     return None
 
 
-def _load_runtime_contract():
-    p = Path(__file__).with_name('runtime-contract.py')
-    if not p.is_file():
-        return None
-    try:
-        spec = importlib.util.spec_from_file_location('_lemvo_owner_contract', str(p))
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        return mod
-    except Exception:
-        return None
-
-
-def _parse_budget_yaml(state_path):
-    out = {}
-    if not state_path.is_file():
-        return out
-    top = ''
-    try:
-        lines = state_path.read_text(encoding='utf-8', errors='replace').splitlines()
-    except OSError:
-        return out
-    for raw in lines:
-        line = re.sub(r'\s+#.*$', '', raw).rstrip()
-        m = re.match(r'^(\s*)([A-Za-z_][\w-]*)\s*:\s*(.*)$', line)
-        if not m:
-            continue
-        indent, key, val = len(m.group(1)), m.group(2), m.group(3).strip().strip('"\'')
-        if indent == 0:
-            top = key
-        elif top == 'budget' and indent == 2:
-            out[key] = val
-    return out
-
-
 def _budget_exhausted(root):
-    b = _parse_budget_yaml(root / 'research-state.yaml')
-    if b.get('unit', '').strip().lower() != 'usd':
-        return False
-    auth = b.get('cap_authorized', '').strip().lower()
-    src = b.get('cap_source', '').strip().lower()
-    if auth != 'yes' or src in _INVALID_CAP_SOURCES:
-        return False
-    try:
-        cap = float(b.get('total_cap', ''))
-        used = float(b.get('used', ''))
-    except (ValueError, TypeError):
-        return False
-    return used >= cap
+    return _lc.budget_exhausted(root)
 
 
 def _contract_state(root):
-    """Inspect WAIT/HARD/DONE/HUMAN status consistently with runtime-contract.py."""
-    state_path = root / 'research-state.yaml'
-    statuses = set()
-    if state_path.is_file():
-        top = ''
-        try:
-            lines = state_path.read_text(encoding='utf-8', errors='replace').splitlines()
-        except OSError:
-            lines = []
-        for raw in lines:
-            line = re.sub(r'\s+#.*$', '', raw).rstrip()
-            m = re.match(r'^(\s*)([\w-]+)\s*:\s*(.*)$', line)
-            if not m:
-                continue
-            indent, key, val = len(m.group(1)), m.group(2), m.group(3).strip().strip("'\"").upper()
-            if not indent:
-                top = key
-                if key in ('campaign_status', 'measurement_state', 'root_status', 'status') and val:
-                    statuses.add(val)
-            elif indent == 2 and top == 'project' and key == 'status' and val:
-                statuses.add(val)
-    markers = {n for n in ('STOP', 'HOLD', 'BLOCKED-USER', 'CAMPAIGN-DONE') if (root / n).is_file()}
-    values = statuses | markers
-    if values & _HARD_STATUSES or (root / 'PAUSE').is_file() or (root / '.runtime-events/PAUSE').is_file():
-        return 'hard', '|'.join(sorted(values & _HARD_STATUSES)) or 'PAUSE'
-    if values & _DONE_STATUSES:
-        return 'done', '|'.join(sorted(values & _DONE_STATUSES))
-    if values & _HUMAN_STATUSES:
-        return 'human', '|'.join(sorted(values & _HUMAN_STATUSES))
-    return 'ready', 'ready'
+    kind, reason, _ = _lc.contract_gate_state(root, include_resource=False, check_pause_files=True)
+    return kind, reason
 
 
 def _has_eligible_guidance(root):
-    qdir = root / '.lemvo-steer-queue'
-    if not qdir.is_dir():
-        return False
-    return any(True for _ in qdir.glob('q-*.md'))
+    return _lc.has_pending_steer(root)
 
 
 def terminal(job):

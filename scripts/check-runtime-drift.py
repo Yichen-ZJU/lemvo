@@ -1,18 +1,23 @@
 #!/usr/bin/env python3
-"""Verify Lemvo runtime template parity, shared skill contract alignment, and syntax."""
+"""Verify Lemvo runtime template parity, Python 3.6+ compatibility, syntax, and sync."""
 import argparse
+import ast
 import hashlib
+import os
 from pathlib import Path
 import py_compile
+import shutil
 import subprocess
 import sys
 
 CANONICAL_FILES = (
+    'autoloop-helper.py',
     'autoloop-reference.sh',
     'configure-event-runtime.py',
     'event-wait.py',
     'job-events.py',
     'lemvo-run.sh',
+    'lemvo_common.py',
     'native-event-owner.py',
     'research-strategy.py',
     'runtime-contract.py',
@@ -41,6 +46,33 @@ def discover_trees(repo):
     return [repo]
 
 
+def check_py36_compat(path, errors):
+    try:
+        src = path.read_text(encoding='utf-8')
+        tree = ast.parse(src, filename=str(path))
+    except SyntaxError as exc:
+        errors.append('AST parse failed for %s: %s' % (path, exc))
+        return
+    for node in ast.walk(tree):
+        if type(node).__name__ == 'NamedExpr':
+            errors.append('Py3.8+ walrus operator := forbidden in %s:%s' % (path, getattr(node, 'lineno', '?')))
+        elif type(node).__name__ == 'Match':
+            errors.append('Py3.10+ match/case forbidden in %s:%s' % (path, getattr(node, 'lineno', '?')))
+        elif isinstance(node, ast.ImportFrom) and node.module == '__future__':
+            for al in node.names:
+                if al.name == 'annotations':
+                    errors.append('Py3.7+ __future__.annotations forbidden in %s:%s' % (path, node.lineno))
+        elif isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Attribute) and node.func.attr in ('run', 'Popen', 'check_output', 'check_call'):
+                if any(kw.arg == 'text' for kw in node.keywords):
+                    errors.append('Py3.7+ subprocess(..., text=) forbidden in %s:%s' % (path, node.lineno))
+            elif isinstance(node.func, ast.Attribute) and node.func.attr in ('is_relative_to', 'time_ns'):
+                errors.append('Py3.7+/3.9+ .%s() forbidden in %s:%s' % (node.func.attr, path, node.lineno))
+            elif isinstance(node.func, ast.Attribute) and node.func.attr == 'join':
+                if isinstance(node.func.value, ast.Name) and node.func.value.id == 'shlex':
+                    errors.append('Py3.8+ shlex.join() forbidden in %s:%s' % (path, node.lineno))
+
+
 def check_tree(tree, errors):
     tpl = tree / 'skills/research-orchestrator/templates'
     hashes = {}
@@ -55,6 +87,7 @@ def check_tree(tree, errors):
                 py_compile.compile(str(p), doraise=True)
             except py_compile.PyCompileError as exc:
                 errors.append('py_compile failed for %s: %s' % (p, exc))
+            check_py36_compat(p, errors)
         elif name.endswith('.sh'):
             res = subprocess.run(['bash', '-n', str(p)], stdout=subprocess.PIPE, stderr=subprocess.PIPE, universal_newlines=True)
             if res.returncode != 0:
@@ -75,6 +108,41 @@ def check_tree(tree, errors):
     return hashes
 
 
+def _copy_file_with_mode(src, dst):
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(str(src), str(dst))
+
+
+def _sync_companion_dir(src_root, dst_root, sub):
+    sa, db = src_root / sub, dst_root / sub
+    if not sa.is_dir() or not db.is_dir():
+        return
+    src_files = {p.relative_to(sa).as_posix(): p for p in sa.rglob('*')
+                 if p.is_file() and '__pycache__' not in p.parts and p.suffix != '.pyc'}
+    dst_files = {p.relative_to(db).as_posix(): p for p in db.rglob('*')
+                 if p.is_file() and '__pycache__' not in p.parts and p.suffix != '.pyc'}
+    for rel in set(dst_files) - set(src_files):
+        dst_files[rel].unlink()
+    for rel, sp in src_files.items():
+        _copy_file_with_mode(sp, db / rel)
+
+
+def sync_targets(root, targets):
+    src_tree = discover_trees(root)[0]
+    all_trees = discover_trees(root)[1:]
+    for t_str in targets:
+        t_path = Path(t_str).resolve()
+        all_trees.extend(discover_trees(t_path))
+        for sub in ('console', 'desktop'):
+            _sync_companion_dir(root, t_path, sub)
+    for dt in all_trees:
+        for name in CANONICAL_FILES:
+            _copy_file_with_mode(src_tree / 'skills/research-orchestrator/templates' / name,
+                                 dt / 'skills/research-orchestrator/templates' / name)
+        for rel in SHARED_SKILL_FILES:
+            _copy_file_with_mode(src_tree / rel, dt / rel)
+
+
 def check_companion_dir(repo_a, repo_b, sub, errors):
     da, db = repo_a / sub, repo_b / sub
     if not da.is_dir() or not db.is_dir():
@@ -92,9 +160,17 @@ def main(argv=None):
     parser = argparse.ArgumentParser()
     parser.add_argument('--repo', default=str(Path(__file__).resolve().parents[1]))
     parser.add_argument('--compare', action='append', default=[])
+    parser.add_argument('--sync', action='append', default=[])
     args = parser.parse_args(argv)
 
     root = Path(args.repo).resolve()
+    if args.sync:
+        sync_targets(root, args.sync)
+    compares = list(args.compare)
+    for s in args.sync:
+        if s not in compares:
+            compares.append(s)
+
     errors = []
     trees = discover_trees(root)
     baseline = None
@@ -106,7 +182,7 @@ def main(argv=None):
             diffs = [k for k in sorted(set(h) | set(baseline[1])) if h.get(k) != baseline[1].get(k)]
             errors.append('Template/skill drift between %s and %s: %s' % (baseline[0], tree, diffs))
 
-    for other_str in args.compare:
+    for other_str in compares:
         other = Path(other_str).resolve()
         for otree in discover_trees(other):
             oh = check_tree(otree, errors)
@@ -120,7 +196,7 @@ def main(argv=None):
         for e in errors:
             print('DRIFT_ERROR:', e, file=sys.stderr)
         return 1
-    print('RUNTIME_DRIFT_OK trees=%d' % (len(trees) + sum(len(discover_trees(Path(x))) for x in args.compare)))
+    print('RUNTIME_DRIFT_OK trees=%d compares=%d' % (len(trees), len(compares)))
     return 0
 
 

@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 """Deterministic wait, progress and instruction contracts. No model/process control."""
 import argparse
-import contextlib
-import fcntl
 import hashlib
 import json
 import os
@@ -23,27 +21,16 @@ META = {'research-state.yaml', 'STATE.md', 'campaign_log.txt', 'research-log.md'
         'work-result.json', 'work-settlement.json', 'context-prompt.md'}
 PROTECTED_SCOPES = {'global', 'constraints', 'authorization', 'safety'}
 
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import lemvo_common as _lc
+
 
 def atomic(path, value):
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(prefix='.'+p.name+'-', dir=str(p.parent))
-    try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as f:
-            f.write(value if isinstance(value, str) else json.dumps(value, ensure_ascii=False, indent=2))
-            f.flush()
-            os.fsync(f.fileno())
-        os.replace(tmp, str(p))
-    finally:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
+    _lc.atomic_write(path, value, indent=2, fsync=True)
 
 
-def load(path, default=None):
-    try:
-        return json.loads(Path(path).read_text(encoding='utf-8'))
-    except (OSError, ValueError):
-        return default
+load = _lc.load_json
 
 
 def scalar(raw):
@@ -78,17 +65,9 @@ def fields():
 
 
 def state():
-    f = fields()
-    statuses = sorted({f.get(k, '').upper() for k in
-                       ('campaign_status', 'measurement_state', 'root_status', 'status', 'project.status')}- {''})
-    markers = [n for n in ('STOP', 'HOLD', 'BLOCKED-USER', 'CAMPAIGN-DONE') if Path(n).is_file()]
-    values = set(statuses+markers)
-    # Explicit stop always wins; a completed campaign cannot be restarted by steer.
-    kind = ('hard' if values & HARD else 'done' if values & DONE else
-            'human' if values & HUMAN else 'resource' if 'WAITING_RESOURCE' in values else 'ready')
-    reason = '|'.join(sorted(values & (HARD if kind=='hard' else DONE if kind=='done' else HUMAN))) if kind in ('hard','done','human') else kind
-    question = f.get('runtime_wait.question', '')
-    identity = f.get('runtime_wait.question_id', '')
+    kind, reason, rw = _lc.contract_gate_state('.', include_resource=True, check_pause_files=False)
+    question = rw.get('question', '')
+    identity = rw.get('question_id', '')
     fingerprint = hashlib.sha256(json.dumps([kind, reason, question, identity]).encode()).hexdigest()
     previous = load('.lemvo-wait-state.json', {})
     if kind in ('human', 'hard'):
@@ -138,11 +117,8 @@ def registry():
     return r
 
 
-@contextlib.contextmanager
 def instruction_lock():
-    with open('.lemvo-instructions.lock', 'a') as f:
-        fcntl.flock(f, fcntl.LOCK_EX)
-        yield
+    return _lc.locked_file('.lemvo-instructions.lock')
 
 
 def incorporate(r, item):
@@ -334,12 +310,7 @@ def explicit_files():
     return {str(Path(p).absolute()):digest(p) for p in paths}
 
 
-def pid_identity(pid):
-    try:
-        f=Path('/proc/%d/stat'%int(pid)).read_text().rsplit(')',1)[1].split()
-        return f[19] if f[0]!='Z' else None
-    except (OSError,ValueError,TypeError,IndexError):
-        return None
+pid_identity = _lc.process_start_ticks
 
 
 def job_evidence():

@@ -6,20 +6,19 @@ Receipts represent execution observations, never a scientific verdict.
 Python 3.6+ stdlib only.
 """
 import argparse
-from contextlib import contextmanager
 import hashlib
 import json
 import os
 from pathlib import Path
 import re
 import socket
-import tempfile
+import sys
 import time
 
-try:
-    import fcntl
-except ImportError:
-    fcntl = None
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import lemvo_common as _lc
+
 
 SENTINEL_KEYS = ('done_file', 'done_path', 'terminal_receipt', 'wait_file')
 RESULT_KEYS = ('result_path', 'result_file')
@@ -42,93 +41,29 @@ _SENTINEL_META_KEYS = frozenset((
 ))
 
 
+load = _lc.load_json
+locked = _lc.locked_file
+_proc_start_epoch = _lc.proc_start_epoch
+
+
 def atomic(path, value):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, name = tempfile.mkstemp(prefix='.' + path.name + '-', dir=str(path.parent))
-    try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
-            json.dump(value, stream, ensure_ascii=False, indent=1)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(name, str(path))
-    finally:
-        if os.path.exists(name):
-            os.unlink(name)
-
-
-def load(path, default=None):
-    try:
-        return json.loads(Path(path).read_text(encoding='utf-8'))
-    except (OSError, ValueError, UnicodeError):
-        return default
-
-
-@contextmanager
-def locked(path):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open('a+b') as stream:
-        if fcntl:
-            fcntl.flock(stream.fileno(), fcntl.LOCK_EX)
-        else:
-            import msvcrt
-            if stream.seek(0, 2) == 0:
-                stream.write(b'0')
-                stream.flush()
-            stream.seek(0)
-            msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
-        try:
-            yield
-        finally:
-            if fcntl:
-                fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
-            else:
-                stream.seek(0)
-                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+    _lc.atomic_write(path, value, indent=1, fsync=True)
 
 
 def identity(pid):
-    try:
-        pid = int(pid)
-        if pid <= 0:
-            return None
-        p = Path('/proc') / str(pid)
-        fields = (p / 'stat').read_text().rsplit(')', 1)[1].split()
-        return {'pid': pid, 'start': fields[19], 'state': fields[0],
-                'uid': p.stat().st_uid}
-    except (OSError, ValueError, TypeError, IndexError):
+    item = _lc.proc_identity(pid)
+    if not item:
         return None
+    return {'pid': item['pid'], 'start': item['start'], 'state': item['state'], 'uid': item['uid']}
 
 
 def _alive_identity(pid, expected_start=None):
-    if not pid:
-        return False
-    item = identity(pid)
-    return bool(
-        item
-        and item['state'] not in ('Z', 'X')
-        and (not expected_start or str(expected_start) == item['start'])
-    )
+    return bool(pid) and _lc.pid_alive(pid, expected_start if expected_start else None)
 
 
 def alive(job):
     expected = job.get('pid_start') or job.get('start')
     return _alive_identity(job.get('pid'), expected)
-
-
-def _proc_start_epoch(start_ticks):
-    if not start_ticks:
-        return None
-    try:
-        boot = next(
-            int(s.split()[1])
-            for s in Path('/proc/stat').read_text().splitlines()
-            if s.startswith('btime ')
-        )
-        return boot + float(start_ticks) / os.sysconf('SC_CLK_TCK')
-    except (OSError, ValueError, TypeError, StopIteration, AttributeError):
-        return None
 
 
 def _to_float_opt(val):
@@ -636,6 +571,7 @@ def publish(rows, directory):
                 stream.write(json.dumps({'ts': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
                                          'event': 'terminal', 'name': row.get('name'),
                                          'status': row['status'], 'run_id': row.get('run_id'),
+                                         'pid': row.get('pid'), 'pid_start': row.get('pid_start'),
                                          'trigger': 'job-terminal', 'event_key': key}) + '\n')
 
 
@@ -666,7 +602,144 @@ def stamp_started(jobs_file):
         return changed
 
 
+def sync_runtime_event_jobs(jobs_file, receipts_dir=None):
+    """Merge unarchived entries from .runtime-events/jobs.json into .lemvo-jobs.json."""
+    p = Path(jobs_file)
+    if p.name != '.lemvo-jobs.json':
+        return False
+    root = p.resolve().parent
+    rt_file = root / '.runtime-events' / 'jobs.json'
+    if not rt_file.is_file():
+        return False
+    rt_jobs = load(rt_file, None)
+    if not isinstance(rt_jobs, list) or not rt_jobs:
+        return False
+    with locked(root / '.jobs.lock'):
+        if p.exists():
+            cur = load(p, None)
+            if cur is None:
+                try:
+                    if not p.read_text(encoding='utf-8').strip():
+                        cur = []
+                    else:
+                        return False
+                except OSError:
+                    return False
+            elif not isinstance(cur, list) or any(not isinstance(x, dict) for x in cur):
+                return False
+        else:
+            cur = []
+
+        known_ids = set()
+        known_pids = set()
+        for entry in cur:
+            for k in ('run_id', 'job_id', 'name'):
+                v = entry.get(k)
+                if v:
+                    known_ids.add(str(v))
+            ep = entry.get('pid')
+            es = entry.get('pid_start') or entry.get('start')
+            if ep is not None and es is not None:
+                known_pids.add((str(ep), str(es)))
+
+        receipted_ids = set()
+        receipted_pids = set()
+        rdir = Path(receipts_dir) if receipts_dir else (root / '.lemvo-receipts')
+        if rdir.is_dir():
+            for rp in rdir.glob('*.json'):
+                rec = load(rp, None)
+                if not isinstance(rec, dict):
+                    continue
+                for k in ('run_id', 'job_id', 'name'):
+                    v = rec.get(k)
+                    if v:
+                        receipted_ids.add(str(v))
+                rp_id, rp_st = rec.get('pid'), rec.get('pid_start')
+                if rp_id is not None and rp_st is not None:
+                    receipted_pids.add((str(rp_id), str(rp_st)))
+        hist_path = root / '.lemvo-jobs-history.jsonl'
+        if hist_path.is_file():
+            try:
+                for line in hist_path.read_text(encoding='utf-8', errors='replace').splitlines():
+                    line = line.strip()
+                    if not line:
+                        continue
+                    item = json.loads(line)
+                    if not isinstance(item, dict):
+                        continue
+                    for k in ('run_id', 'job_id', 'name'):
+                        v = item.get(k)
+                        if v:
+                            receipted_ids.add(str(v))
+                    hp, hs = item.get('pid'), item.get('pid_start')
+                    if hp is not None and hs is not None:
+                        receipted_pids.add((str(hp), str(hs)))
+            except (OSError, ValueError):
+                pass
+
+        changed = False
+        for rj in rt_jobs:
+            if not isinstance(rj, dict):
+                continue
+            jid = rj.get('job_id')
+            pid = rj.get('pid')
+            pstart = rj.get('start')
+            if not jid or not str(pid).isdigit() or not str(pstart).isdigit():
+                continue
+            jid_s = str(jid)
+            pid_i = int(pid)
+            pstart_s = str(pstart)
+            if jid_s in known_ids or (str(pid_i), pstart_s) in known_pids:
+                continue
+            if jid_s in receipted_ids or (str(pid_i), pstart_s) in receipted_pids:
+                continue
+            done_files = [str(x) for x in (rj.get('done_files') or []) if isinstance(x, str) and x]
+            failed_files = [str(x) for x in (rj.get('failed_files') or []) if isinstance(x, str) and x]
+            is_live = _alive_identity(pid_i, pstart_s)
+            has_marker = False
+            if not is_live:
+                proc_ep = _proc_start_epoch(pstart_s)
+                for mf in done_files + failed_files:
+                    mp = Path(mf)
+                    try:
+                        st = mp.stat()
+                        if mp.is_file() and (proc_ep is None or rj.get('accept_cached_markers') or st.st_mtime >= proc_ep - 1.0):
+                            has_marker = True
+                            break
+                    except OSError:
+                        pass
+            if not is_live and not has_marker:
+                continue
+            merged = {
+                'name': jid_s,
+                'run_id': jid_s,
+                'job_id': jid_s,
+                'pid': pid_i,
+                'pid_start': pstart_s,
+                'started_epoch': rj.get('registered_at') or _proc_start_epoch(pstart_s) or time.time(),
+                'source': 'runtime-events-sync',
+            }
+            if done_files:
+                merged['done_file'] = done_files[0]
+                if len(done_files) > 1:
+                    merged['done_files'] = done_files
+            if failed_files:
+                merged['failed_file'] = failed_files[0]
+                if len(failed_files) > 1:
+                    merged['failed_files'] = failed_files
+            if rj.get('done_format') and rj.get('done_format') != 'auto':
+                merged['done_format'] = rj['done_format']
+            cur.append(merged)
+            known_ids.add(jid_s)
+            known_pids.add((str(pid_i), pstart_s))
+            changed = True
+        if changed:
+            atomic(p, cur)
+        return changed
+
+
 def reconcile(jobs_file, states_file, receipts, stamp_started_flag=False):
+    sync_runtime_event_jobs(jobs_file, receipts)
     if stamp_started_flag:
         stamp_started(jobs_file)
     p = Path(jobs_file)

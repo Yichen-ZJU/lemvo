@@ -12,9 +12,7 @@ Checks are read-only. Only successful settlement changes the durable baseline.
 Existing controller locks, event delivery and failure backoff retain ownership.
 """
 import argparse
-import contextlib
 import hashlib
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -22,7 +20,6 @@ import re
 import runpy
 import shlex
 import sys
-import tempfile
 import time
 
 
@@ -60,52 +57,20 @@ BINARY_SUFFIXES = frozenset(('.bin', '.pt', '.pth', '.ckpt', '.safetensors', '.o
     '.mp3', '.npy', '.npz', '.parquet', '.sqlite', '.sqlite3', '.db', '.zip', '.gz'))
 KEY_LINE = re.compile(r"^( *)([A-Za-z_][\w-]*|'(?:[^']|'')+'|\"(?:[^\"\\]|\\.)+\")\s*:\s*(.*)$")
 
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import lemvo_common as _lc
 
-def _load(path, default=None):
-    try:
-        return json.loads(Path(path).read_text(encoding='utf-8-sig'))
-    except (OSError, ValueError):
-        return default
+
+_load = _lc.load_json
 
 
 def _atomic(path, value):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix='.' + path.name + '-', dir=str(path.parent))
-    try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as stream:
-            json.dump(value, stream, ensure_ascii=False, indent=2, sort_keys=True)
-            stream.write('\n')
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary, str(path))
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+    _lc.atomic_write(path, value, indent=2, sort_keys=True, trailing_newline=True, fsync=True)
 
 
-@contextlib.contextmanager
 def _settlement_lock(root):
-    with (root / (STATE_FILE + '.lock')).open('a+b') as stream:
-        if os.name == 'nt':
-            import msvcrt
-            stream.seek(0)
-            if not stream.read(1):
-                stream.write(b' ')
-                stream.flush()
-            stream.seek(0)
-            msvcrt.locking(stream.fileno(), msvcrt.LK_LOCK, 1)
-        else:
-            import fcntl
-            fcntl.flock(stream, fcntl.LOCK_EX)
-        try:
-            yield
-        finally:
-            if os.name == 'nt':
-                stream.seek(0)
-                msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
-            else:
-                fcntl.flock(stream, fcntl.LOCK_UN)
+    return _lc.locked_file(Path(root) / (STATE_FILE + '.lock'))
 
 
 def _strip_json_accounting(value, path=()):
@@ -218,6 +183,156 @@ def _source_path(root, name):
     return path
 
 
+COMPLETION_DIR_NAMES = ('experiments', 'outputs', 'results', 'runs')
+COMPLETION_EXACT_NAMES = frozenset((
+    'ARM_DONE.json', 'DONE', 'FAILED', 'charter_metrics.json', 'summary.json', 'eval_results.json',
+))
+COMPLETION_SUFFIXES = ('_DONE.json', '_FAILED.json', '.done', '.failed')
+_LEMVO_INFRA_TOKENS = frozenset((
+    'lemvo-run.sh', 'autoloop-reference.sh', 'autoloop-helper.py', 'runtime-idle.py',
+    'runtime-support.py', 'runtime-contract.py', 'job-events.py', 'event-wait.py',
+    'native-event-owner.py', 'work-unit.py', 'research-strategy.py', 'runtime-heartbeat.py',
+    'run_tests.sh',
+))
+_EXCLUDED_BINS = frozenset((
+    'claude', 'codex', 'sleep', 'sshd', 'tmux', 'screen', 'ps', 'grep', 'pgrep', 'rg', 'tail', 'cat',
+))
+
+
+def _discover_completion_markers(root, max_depth=3, max_entries=256):
+    """Bounded discovery of experiment completion markers inside project artifact dirs."""
+    found = []
+    seen_dirs = 0
+    for base_name in COMPLETION_DIR_NAMES:
+        base = root / base_name
+        if not base.is_dir() or base.is_symlink():
+            continue
+        stack = [(base, 1)]
+        while stack and len(found) < max_entries and seen_dirs < max_entries * 4:
+            cur, depth = stack.pop(0)
+            seen_dirs += 1
+            try:
+                entries = sorted(os.scandir(str(cur)), key=lambda e: e.name)
+            except OSError:
+                continue
+            for entry in entries:
+                if len(found) >= max_entries:
+                    break
+                name = entry.name
+                if name.startswith('.'):
+                    continue
+                try:
+                    is_link = entry.is_symlink()
+                    if is_link:
+                        continue
+                    if entry.is_dir(follow_symlinks=False):
+                        if depth < max_depth and name.lower() not in IGNORED_DIRECTORIES:
+                            stack.append((Path(entry.path), depth + 1))
+                    elif entry.is_file(follow_symlinks=False):
+                        if name in COMPLETION_EXACT_NAMES or name.endswith(COMPLETION_SUFFIXES):
+                            found.append(Path(entry.path))
+                except OSError:
+                    continue
+    return found
+
+
+_ancestor_pids = _lc.ancestor_pids
+
+
+def _ensure_waiting_jobs_indexed(root):
+    """Sync .runtime-events and auto-adopt live project-bound producers on waiting settlement."""
+    try:
+        je = _load_sibling('job-events.py')
+        je.sync_runtime_event_jobs(root / '.lemvo-jobs.json', root / '.lemvo-receipts')
+    except Exception:
+        je = None
+    if (root / '.lemvo-wait.json').exists():
+        return
+    jobs_file = root / '.lemvo-jobs.json'
+    if je is not None and jobs_file.exists():
+        cur_jobs = je.load(jobs_file, None)
+        if isinstance(cur_jobs, list) and any(isinstance(j, dict) and je.alive(j) for j in cur_jobs):
+            return
+        if cur_jobs is None or not isinstance(cur_jobs, list):
+            return
+    proc_root = Path('/proc')
+    if not proc_root.is_dir() or je is None:
+        return
+    uid = os.getuid() if hasattr(os, 'getuid') else None
+    ancestors = _ancestor_pids()
+    root_str = str(root)
+    adopted = []
+    try:
+        proc_entries = os.listdir(str(proc_root))
+    except OSError:
+        return
+    for name in proc_entries:
+        if not name.isdigit():
+            continue
+        pid = int(name)
+        if pid <= 1 or pid in ancestors:
+            continue
+        pdir = proc_root / name
+        try:
+            if uid is not None and pdir.stat().st_uid != uid:
+                continue
+            fields = (pdir / 'stat').read_text().rsplit(')', 1)[1].split()
+            state, pstart = fields[0], fields[19]
+            if state in ('Z', 'X'):
+                continue
+            cmd_bytes = (pdir / 'cmdline').read_bytes()
+        except (OSError, ValueError, IndexError):
+            continue
+        args = [a.decode('utf-8', 'replace') for a in cmd_bytes.split(b'\0') if a]
+        if not args:
+            continue
+        cmd_text = ' '.join(args)
+        argv0_base = os.path.basename(args[0])
+        if argv0_base in _EXCLUDED_BINS:
+            continue
+        if any(tok in cmd_text for tok in _LEMVO_INFRA_TOKENS) or 'unittest' in cmd_text:
+            continue
+        in_cmd = bool(re.search(re.escape(root_str) + r'(?=[/\\]|\s|$)', cmd_text))
+        in_cwd = False
+        if not in_cmd:
+            try:
+                cwd = (pdir / 'cwd').resolve(strict=True)
+                in_cwd = (cwd == root or root in cwd.parents)
+            except OSError:
+                in_cwd = False
+        if not (in_cmd or in_cwd):
+            continue
+        # When bound only by cwd, require a plausible compute/script runner to avoid adopting shells.
+        if not in_cmd and argv0_base in ('bash', 'sh', 'zsh', 'dash') and len(args) < 2:
+            continue
+        started_ep = je._proc_start_epoch(pstart) or time.time()
+        adopted.append({
+            'name': 'auto-adopted-%d' % pid,
+            'run_id': 'auto-adopted-%d-%s' % (pid, pstart),
+            'job_id': 'auto-adopted-%d-%s' % (pid, pstart),
+            'pid': pid,
+            'pid_start': pstart,
+            'started_epoch': started_ep,
+            'auto_adopted': True,
+            'source': 'proc-auto-adopt',
+        })
+    if not adopted:
+        return
+    with je.locked(root / '.jobs.lock'):
+        existing = je.load(jobs_file, []) if jobs_file.exists() else []
+        if not isinstance(existing, list):
+            return
+        known_pids = set((str(e.get('pid')), str(e.get('pid_start') or e.get('start') or ''))
+                         for e in existing if isinstance(e, dict))
+        added = False
+        for item in adopted:
+            if (str(item['pid']), str(item['pid_start'])) not in known_pids:
+                existing.append(item)
+                added = True
+        if added:
+            je.atomic(jobs_file, existing)
+
+
 def scientific_snapshot(root, context_files=None, normalize_defaults=False):
     """Hash only known source/explicit artifact content, never mtimes or ledgers."""
     root = Path(root).resolve()
@@ -227,6 +342,7 @@ def scientific_snapshot(root, context_files=None, normalize_defaults=False):
     else:
         names += _names(context_files)
     names += _names(_load(root / '.lemvo-progress-paths.json', []))
+    names += _discover_completion_markers(root)
     paths = set()
     for name in names:
         path = _source_path(root, name)
@@ -271,17 +387,7 @@ _MOD_CACHE = {}
 
 
 def _load_sibling(name):
-    path = Path(__file__).resolve().with_name(name)
-    key = str(path)
-    mod = _MOD_CACHE.get(key)
-    if mod is None:
-        spec = importlib.util.spec_from_file_location('_lemvo_' + name.replace('.', '_').replace('-', '_'), key)
-        if spec is None or spec.loader is None:
-            raise OSError('Cannot load sibling helper: ' + key)
-        mod = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(mod)
-        _MOD_CACHE[key] = mod
-    return mod
+    return _lc.load_sibling(__file__, name, _MOD_CACHE)
 
 
 def _declared_condition(root):
@@ -378,6 +484,8 @@ def settle(root, td):
         # Never sample readiness during confirmation. A ready condition becomes
         # acknowledged only when this successful turn received that exact event.
         condition = delivered_condition or old.get('declared_wait_condition')
+        if status == 'waiting':
+            _ensure_waiting_jobs_indexed(root)
         record = {'schema': 'lemvo-runtime-idle-v1', 'armed': status == 'waiting',
                   'turn_id': td.name, 'settled': True, 'work_status': status,
                   'reason': 'structured-waiting' if status == 'waiting' else 'successful-work',

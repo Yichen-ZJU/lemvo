@@ -273,21 +273,7 @@ write_receipts() {  # Repeated all-terminal reconciliation must not duplicate ev
   python3 "$JOB_EVENTS" publish .lemvo-jobstates.json "$RECEIPTS"
 }
 pending_receipt_paths() {  # Read only; also used to wake a settled idle worker.
-  python3 - "$RECEIPTS" <<'PYC0'
-import json, os, sys
-d = sys.argv[1]
-out = []
-if os.path.isdir(d):
-    for fn in sorted(os.listdir(d)):
-        if not fn.endswith(".json"): continue
-        p = os.path.join(d, fn)
-        try:
-            if json.load(open(p)).get("consumed"): continue
-        except Exception: continue
-        out.append(p)
-        if len(out) >= 20: break
-print("\n".join(out))
-PYC0
+  python3 "$RUNTIME_SUPPORT" receipts-pending "$RECEIPTS" 20
 }
 consume_receipts_snapshot() {  # 未消费回执 → 合并消息路径；只取前 20 且只确认这 20
   local f out
@@ -295,47 +281,13 @@ consume_receipts_snapshot() {  # 未消费回执 → 合并消息路径；只取
   [ -z "$f" ] && return 1
   out=$(mktemp)
   echo "$f" > "$out.list"
-  echo "以下后台作业已出结果（回执，未消费）：" > "$out"
-  for r in $f; do
-    python3 - "$r" >> "$out" <<'PYC'
-import json, sys
-r = json.load(open(sys.argv[1]))
-rf = r.get("result_file")
-rf_note = (" result_file=%s" % rf) if rf else ""
-print("- %s: status=%s run_id=%s exit_code=%s done_file=%s%s (run 事实；请读结果、改方法、继续；勿重跑同 run_id)" % (
-    r.get("name"), r.get("status"), r.get("run_id"), r.get("exit_code"), r.get("done_file"), rf_note))
-# Reuse already parsed producer fields. Do not guess metrics from log text,
-# change units, or treat missing values as zero.
-payload = {"metrics": r.get("metrics"), "result": r.get("result")}
-if any(v is not None for v in payload.values()):
-    encoded = json.dumps(payload, ensure_ascii=False)
-    if len(encoded) <= 5000:
-        print("  Recorded producer result (scope/settings remain as supplied): " + encoded)
-    else:
-        print("  Large producer result retained in receipt %s; read the relevant fields rather than the full training log." % sys.argv[1])
-PYC
-  done
+  python3 "$RUNTIME_SUPPORT" receipts-format "$out" $f || { rm -f "$out" "$out.list"; return 1; }
   echo "$out"
 }
 mark_receipts_consumed() {  # 只确认 $1 清单内的（本批成功后才确认）
   local listf="${1:-}"
   [ -z "$listf" ] && return 0
-  while IFS= read -r r; do
-    [ -f "$r" ] || continue
-    python3 - "$r" <<'PYM'
-import json, os, sys, tempfile
-p = sys.argv[1]
-try:
-    d = json.load(open(p))
-    d["consumed"] = True
-    fd, temporary = tempfile.mkstemp(prefix=".consumed-", dir=os.path.dirname(p) or ".")
-    with os.fdopen(fd, "w") as stream:
-        json.dump(d, stream, indent=1)
-        stream.flush(); os.fsync(stream.fileno())
-    os.replace(temporary, p)
-except Exception: pass
-PYM
-  done < "$listf"
+  python3 "$RUNTIME_SUPPORT" receipts-consume "$listf"
 }
 
 # ── steer 队列快照（只扫已原子发布的不可变文件）──
@@ -415,20 +367,7 @@ begin_turn() {  # 设置全局 TD/TURN_ID，写 manifest 骨架；导出给 adap
   mkdir -p "$TD"
   export LEMVO_TURN_DIR="$TD" LEMVO_TURN_ID="$TURN_ID" LEMVO_OWNER_PID=$$
   export LEMVO_ENGINE_TAG="$(engine_now)"
-  python3 - "$TD" "$TURN_ID" "$PROJ" "$$" <<'PYM'
-import json, os, socket, sys, time
-td, tid, proj, cpid = sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4])
-man = {"schema_version": 1, "schema": "lemvo-turn-manifest",
-       "session_epoch": open(".lemvo-session-epoch").read().strip() if os.path.exists(".lemvo-session-epoch") else "legacy",
-       "campaign_id": socket.gethostname() + ":" + os.path.basename(os.path.realpath(proj)),
-       "turn_id": tid, "host": socket.gethostname(),
-       "controller_pid": cpid,
-       "engine": os.environ.get("LEMVO_ENGINE_TAG", ""),
-       "status": "dispatched",
-       "started_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
-json.dump(man, open(os.path.join(td, "manifest.json"), "w"), indent=1)
-PYM
-  python3 "$RUNTIME_SUPPORT" turn-register "$TD" || return 4
+  python3 "$RUNTIME_SUPPORT" turn-manifest-begin "$TD" "$TURN_ID" "$PROJ" "$$" "$LEMVO_ENGINE_TAG" || return 4
 }
 confirm_turn() {  # 本批成功后：归档 steer、确认回执、合并 job/steer 引用、settled
   # Use the same order as recovery. Commit the wait before the settled marker.
@@ -439,29 +378,7 @@ confirm_turn() {  # 本批成功后：归档 steer、确认回执、合并 job/s
     python3 "$RUNTIME_SUPPORT" delivery superseded "$TD/steer-superseded.list" "${TURN_ID:-}"
     steer_archive_consumed "$TD/steer-superseded.list"
   fi
-  if [ -n "${TD:-}" ] && [ -f "$TD/result.json" ]; then
-    python3 - "$TD" <<'PYC2'
-import json, os, sys
-td = sys.argv[1]
-try:
-    r = json.load(open(os.path.join(td, "result.json")))
-except Exception:
-    r = {}
-jobs = []
-if os.path.exists(td + "/job-batch.list"):
-    jobs = [os.path.splitext(os.path.basename(l.strip()))[0] for l in open(td + "/job-batch.list") if l.strip()]
-steers = []
-if os.path.exists(td + "/steer-published.list"):
-    steers = [os.path.basename(l.strip()) for l in open(td + "/steer-published.list") if l.strip()]
-if jobs: r["job_ids"] = jobs
-if steers: r["steer_ids"] = steers
-target=os.path.join(td, "result.json")
-tmp=target+".tmp-%d"%os.getpid()
-json.dump(r, open(tmp, "w"), indent=1)
-os.replace(tmp,target)
-PYC2
-  fi
-  python3 "$RUNTIME_SUPPORT" recovery-mark "$TD" settled confirmed
+  python3 "$RUNTIME_SUPPORT" turn-result-confirm "$TD"
 }
 
 # ── E1：共用 step —— 组装本批 steer+回执（advance 与主循环同一路径）──
@@ -544,10 +461,7 @@ if [ "$CMD" = "purge" ]; then
   for TD in turns/*/; do
     EJ="${TD}engine.json"
     [ -f "$EJ" ] || continue
-    EP=$(python3 -c 'import json,sys
-try:
- d=json.load(open(sys.argv[1])); print(d.get("pid_engine","")); print(d.get("pid_engine_start",""))
-except Exception: print("");print("")' "$EJ" 2>/dev/null)
+    EP=$(python3 "$RUNTIME_SUPPORT" engine-json-pids "$EJ" 2>/dev/null || true)
     EPID=$(printf '%s\n' "$EP" | sed -n 1p); EPST=$(printf '%s\n' "$EP" | sed -n 2p)
     if [ -n "$EPID" ] && kill -0 "$EPID" 2>/dev/null && [ "$(pid_start "$EPID" 2>/dev/null)" = "$EPST" ]; then
       kill "$EPID" 2>/dev/null && echo "已终止孤儿引擎 pid=$EPID（身份核验通过）"
@@ -634,16 +548,7 @@ mkdir -p "$QUEUE" "$ARCHIVE" "$RECEIPTS" "$TURNSD"
 [ -n "$DELEGATION" ] && echo "$DELEGATION" > .lemvo-delegation
 python3 "$RUNTIME_SUPPORT" doctor "$SELF" > .lemvo-takeover-inventory.json
 cp .lemvo-takeover-inventory.json .lemvo-runtime-at-start.json
-python3 - <<'PYINV'
-import json
-report=json.load(open('.lemvo-takeover-inventory.json'))
-candidates=report.get('legacy_candidates', [])
-if candidates:
-    print('Takeover notice: project-associated legacy automation PIDs=%s; inspect .lemvo-takeover-inventory.json (not terminated).' % ','.join(str(c['pid']) for c in candidates))
-drift=[c for c in report.get('installed_candidates',[]) if not c['matches_invoked']]
-if drift:
-    print('Runtime version notice: invoked script differs from installed candidates; use doctor before a controlled migration.')
-PYINV
+python3 "$RUNTIME_SUPPORT" takeover-summary .lemvo-takeover-inventory.json
 
 [ -n "$ENGINE" ] && echo "$ENGINE" > "$ENGINE_F"
 export ENGINE="$(engine_now)"
@@ -668,7 +573,7 @@ recover_turns || true
 
 wait_pause() {
   local duration start now
-  duration=$(python3 -c 'import json; print(json.load(open(".lemvo-resource-wait.json")).get("poll_sec",15))' 2>/dev/null || echo "$POLL")
+  duration=$(python3 "$RUNTIME_SUPPORT" resource-wait-poll "$POLL" 2>/dev/null || echo "$POLL")
   log "WAITING_RESOURCE poll_after=${duration}s (no model/turn)"
   start=$SECONDS
   while :; do

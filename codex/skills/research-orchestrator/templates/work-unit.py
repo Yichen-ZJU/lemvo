@@ -7,44 +7,33 @@ job, research verdict, user instruction, or authorization. Python 3.6+ stdlib.
 import argparse
 import datetime
 import hashlib
-import importlib.util
 import json
 import math
 import os
 from pathlib import Path
 import re
-import tempfile
+import sys
 import time
 
 
-_IDLE_MOD = None
-_STRATEGY_MOD = None
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import lemvo_common as _lc
+_MOD_CACHE = {}
 
 
 def _load_idle_module():
-    global _IDLE_MOD
-    if _IDLE_MOD is None:
-        idle = Path(__file__).with_name('runtime-idle.py')
-        if idle.is_file():
-            spec = importlib.util.spec_from_file_location('_lemvo_runtime_idle', str(idle))
-            if spec is not None and spec.loader is not None:
-                mod = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(mod)
-                _IDLE_MOD = mod
-    return _IDLE_MOD
+    try:
+        return _lc.load_sibling(__file__, 'runtime-idle.py', _MOD_CACHE)
+    except OSError:
+        return None
 
 
 def _load_strategy_module():
-    global _STRATEGY_MOD
-    if _STRATEGY_MOD is None:
-        strat = Path(__file__).with_name('research-strategy.py')
-        if strat.is_file():
-            spec = importlib.util.spec_from_file_location('_lemvo_research_strategy', str(strat))
-            if spec is not None and spec.loader is not None:
-                mod = importlib.util.module_from_spec(spec)
-                spec.loader.exec_module(mod)
-                _STRATEGY_MOD = mod
-    return _STRATEGY_MOD
+    try:
+        return _lc.load_sibling(__file__, 'research-strategy.py', _MOD_CACHE)
+    except OSError:
+        return None
 
 
 VERSION = 1
@@ -52,7 +41,8 @@ CONTEXT = Path('.lemvo-context.json')
 POLICY = Path('.lemvo-context-policy.json')
 LAST_RESULT = Path('.lemvo-last-work-result.json')
 DEFAULT_POLICY = {'mode': 'auto', 'max_session_turns': 12,
-                  'max_context_tokens': 120000, 'file_excerpt_chars': 5000}
+                  'max_context_tokens': 120000, 'file_excerpt_chars': 5000,
+                  'cache_ttl_sec': 3300}
 VALID_STATUS = ('completed', 'partial', 'waiting', 'failed', 'unknown')
 MISSING = object()
 
@@ -62,27 +52,11 @@ def now():
 
 
 def atomic(path, value):
-    p = Path(path)
-    p.parent.mkdir(parents=True, exist_ok=True)
-    fd, name = tempfile.mkstemp(prefix='.' + p.name + '-', dir=str(p.parent))
-    try:
-        with os.fdopen(fd, 'w', encoding='utf-8') as f:
-            if isinstance(value, str):
-                f.write(value)
-            else:
-                json.dump(value, f, ensure_ascii=False, indent=2)
-                f.write('\n')
-        os.replace(name, str(p))
-    finally:
-        if os.path.exists(name):
-            os.unlink(name)
+    _lc.atomic_write(path, value, indent=2, trailing_newline=True, fsync=False)
 
 
 def load(path, default=None):
-    try:
-        return json.loads(Path(path).read_text(encoding='utf-8'))
-    except (OSError, ValueError, UnicodeError):
-        return default
+    return _lc.load_json(path, default=default, encoding='utf-8')
 
 
 def text(path, default=''):
@@ -195,12 +169,23 @@ def first(fields, keys, default=None):
 
 def policy():
     p = dict(DEFAULT_POLICY)
-    candidate = load(POLICY, {})
+    env_ttl = os.environ.get('LEMVO_CACHE_TTL_SEC')
+    if env_ttl is not None and env_ttl.strip():
+        try:
+            v = float(env_ttl.strip())
+            if math.isfinite(v) and v >= 0:
+                p['cache_ttl_sec'] = int(v) if v.is_integer() else v
+        except ValueError:
+            pass
+    candidate = load(POLICY)
     if isinstance(candidate, dict):
         for key in p:
             value = candidate.get(key)
             if key == 'mode':
                 if value in ('auto', 'resume', 'fresh'):
+                    p[key] = value
+            elif key == 'cache_ttl_sec':
+                if isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value) and value >= 0:
                     p[key] = value
             elif isinstance(value, int) and not isinstance(value, bool) and value > 0:
                 p[key] = value
@@ -411,6 +396,11 @@ def choose_session(previous, current_sid, engine, phase, branch, p):
     n = request_context_tokens(previous)
     if n is not None and n >= p['max_context_tokens']:
         return 'fresh', 'observed-request-context-size'
+    ttl = p.get('cache_ttl_sec', 3300)
+    ended = numeric_epoch(previous.get('ended_epoch'))
+    if ttl and ttl > 0 and ended is not None and (time.time() - ended) > ttl:
+        if int(previous.get('successful_turns', 0) or 0) >= 2 or (n is not None and n >= 25000):
+            return 'fresh', 'cache-ttl-expired'
     return 'resume', 'same-working-unit'
 
 
@@ -857,6 +847,7 @@ def settle(td, rc=0, session_file='.autoloop-session-id'):
                        'successful_turns': (int(context.get('successful_turns', 0)) + 1) if same else 1,
                        'last_settled_turn': td.name, 'files': plan.get('files', []),
                        'dispatch_order': order,
+                       'ended_epoch': time.time(),
                        'updated_utc': now()}
                 observation = observe_request_context(td/'engine-stdout.jsonl')
                 if observation:

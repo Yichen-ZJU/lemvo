@@ -14,49 +14,16 @@ import shlex
 import sys
 import time
 
-try:
-    import fcntl
-except ImportError:  # Allows deterministic, local Windows tests.
-    fcntl = None
+if str(Path(__file__).resolve().parent) not in sys.path:
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+import lemvo_common as _lc
 
-
-def read(path, default=None):
-    try:
-        return json.loads(Path(path).read_text())
-    except (OSError, ValueError):
-        return default
+read = _lc.load_json
+locked = _lc.locked_file
 
 
 def atomic(path, value):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    tmp = path.with_name(path.name + ".%s.tmp" % os.getpid())
-    tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2))
-    os.replace(tmp, path)
-
-
-@contextmanager
-def locked(path):
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a+b") as handle:
-        if fcntl:
-            fcntl.flock(handle, fcntl.LOCK_EX)
-        else:
-            import msvcrt
-            if handle.seek(0, 2) == 0:
-                handle.write(b"0")
-                handle.flush()
-            handle.seek(0)
-            msvcrt.locking(handle.fileno(), msvcrt.LK_LOCK, 1)
-        try:
-            yield
-        finally:
-            if fcntl:
-                fcntl.flock(handle, fcntl.LOCK_UN)
-            else:
-                handle.seek(0)
-                msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+    _lc.atomic_write(path, value, indent=2, fsync=False)
 
 
 class Runtime:
@@ -73,16 +40,7 @@ class Runtime:
                 out.write(json.dumps({"at": time.time(), "kind": kind, **fields}) + "\n")
 
     def identity(self, pid):
-        try:
-            pid = int(pid)
-            if pid <= 0:
-                return None
-            directory = self.proc_root / str(pid)
-            fields = (directory / "stat").read_text().rsplit(")", 1)[1].split()
-            return {"pid": pid, "start": fields[19], "state": fields[0], "ppid": int(fields[1]),
-                    "uid": directory.stat().st_uid}
-        except (ValueError, OSError, IndexError, TypeError):
-            return None
+        return _lc.proc_identity(pid, proc_root=self.proc_root)
 
     def jobs(self):
         jobs = read(self.state / "jobs.json", [])
@@ -262,6 +220,64 @@ class Runtime:
                 pids.add(int(value))
         return pids
 
+    def _sync_to_lemvo_jobs(self, job):
+        """Mirror event-wait registrations into .lemvo-jobs.json for controller reconcile."""
+        lj_path = self.root / '.lemvo-jobs.json'
+        with locked(self.root / '.jobs.lock'):
+            if lj_path.exists():
+                cur = read(lj_path, None)
+                if cur is None:
+                    try:
+                        if not lj_path.read_text(encoding='utf-8').strip():
+                            cur = []
+                        else:
+                            return
+                    except OSError:
+                        return
+                elif not isinstance(cur, list) or any(not isinstance(x, dict) for x in cur):
+                    return
+            else:
+                cur = []
+            jid = str(job['job_id'])
+            pid = int(job['pid'])
+            pstart = str(job['start'])
+            done_files = list(job.get('done_files') or [])
+            failed_files = list(job.get('failed_files') or [])
+            idx = None
+            for i, entry in enumerate(cur):
+                e_pid = entry.get('pid')
+                e_start = str(entry.get('pid_start') or entry.get('start') or '')
+                e_id = str(entry.get('run_id') or entry.get('job_id') or entry.get('name') or '')
+                if (str(e_pid) == str(pid) and e_start == pstart) or (jid and e_id == jid):
+                    idx = i
+                    break
+            merged = dict(cur[idx]) if idx is not None else {}
+            merged.setdefault('name', jid)
+            merged.setdefault('run_id', jid)
+            merged['job_id'] = jid
+            merged['pid'] = pid
+            merged['pid_start'] = pstart
+            if not merged.get('started_epoch'):
+                merged['started_epoch'] = job.get('registered_at') or time.time()
+            merged.setdefault('source', 'event-wait')
+            if done_files:
+                merged['done_file'] = done_files[0]
+                if len(done_files) > 1:
+                    merged['done_files'] = done_files
+            if failed_files:
+                merged['failed_file'] = failed_files[0]
+                if len(failed_files) > 1:
+                    merged['failed_files'] = failed_files
+            if job.get('done_format') and job.get('done_format') != 'auto':
+                merged['done_format'] = job['done_format']
+            if idx is not None and cur[idx] == merged:
+                return
+            if idx is not None:
+                cur[idx] = merged
+            else:
+                cur.append(merged)
+            atomic(lj_path, cur)
+
     def adopt_visible_pid(self, pid):
         now = self.identity(pid)
         if not now or now["state"] in ("Z", "X") or pid in self.ancestors():
@@ -294,6 +310,7 @@ class Runtime:
             jobs.append(job)
             atomic(self.state / "jobs.json", jobs)
         self.emit("visible_producer_adopted", job_id=job["job_id"], pid=pid, start=now["start"])
+        self._sync_to_lemvo_jobs(job)
         return job
 
     def resolve(self, event):
@@ -429,6 +446,7 @@ class Runtime:
             jobs = [j for j in jobs if j['job_id'] != job['job_id']] + [job]
             atomic(self.state / 'jobs.json', jobs)
         self.emit('producer_registered', job_id=job['job_id'], pid=job['pid'], start=job['start'])
+        self._sync_to_lemvo_jobs(job)
         return job
 
     def hook(self, event):
